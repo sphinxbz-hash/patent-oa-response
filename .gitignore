@@ -1,0 +1,9 @@
+.DS_Store
+Thumbs.db
+*.skill
+__pycache__/
+*.pyc
+dist/
+.install-check/
+.env
+.env.*

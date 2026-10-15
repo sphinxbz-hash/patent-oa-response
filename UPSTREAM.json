@@ -1,0 +1,29 @@
+{
+  "source": "User-provided Kimi package",
+  "upstream_version": "0.2.0",
+  "import_date": "2026-10-15",
+  "archive_name": "Kimi_Agent_巴西专利答复.zip",
+  "archive_sha256": "0f581b4c508b0ee5413750fb4e90d7a51b8fab712c87c3220ef4d280c86fa5a3",
+  "baseline_file_sha256": {
+    ".gitignore": "53edf8fe54838829b1a721a9bfd1e82b59d38ae95867d6980298ae8ba5853070",
+    "assets/br-resposta-exigencia.md": "692f10eabc9a29a0dfdc5dbd66b9b167dccf1f47abd03d8ccf794ba639fad81a",
+    "assets/ep-reply-94-3-template.md": "56386c460ba52b8e5189069dace603fe280179819acbb306bea1249e575aa8c0",
+    "assets/us-oa-response-template.md": "f55323116dd1c8195139225426d9702117952f7881b8a1497d515ce83ac22753",
+    "CHANGELOG.md": "c170b5cf02b1ede86e429bed65b16d8b3f625a75373e499752b08592edc0396b",
+    "DEPLOY.md": "d009ee2d0f8ccdf0077020258afff0f8ed6c54acedd81b72df78473330fec0ae",
+    "LICENSE": "98058c551f11edeb690e3ce515bdc88061b556f5198aea014eef1302cc55ea4b",
+    "README.md": "3c3d2af34b99c30e0ccc006a6be9ccc1d3d414e0ac1ffc21084abf5154c11e2c",
+    "references/argumentation-core.md": "e65966a353230cb37f3b2fa1508d9c74bfb23234016ccb1d4adabad050da50bb",
+    "references/br.md": "d91aba36e2ffacc8b2f1bb948fc9503d38b9d6f408f9f8c9c97233244d4ee6d7",
+    "references/ep.md": "f6c2f75d94d9bb67abdf2f8bfa22c64cfc24370201f012d439bd0a0d6287204d",
+    "references/family-research.md": "1f312588c91a4d69f04b168fc229b0006f09039bf64d121e0f1266a9fcd72795",
+    "references/us.md": "cf6da07b2a8215f3a9c45891d393ddb4e78e14d35466a19dc5541f3c2fb98a7d",
+    "SKILL.md": "331a9a3be0c8fd8cf44b274c485595785c4797a75e6d6ca9be3956b2b9953ce1"
+  },
+  "preserved_core": [
+    "SKILL.md",
+    "references/",
+    "assets/"
+  ],
+  "note": "Original Kimi baseline hashes. README, DEPLOY, CHANGELOG and packaging files were updated for distribution; core instructions remain unchanged."
+}

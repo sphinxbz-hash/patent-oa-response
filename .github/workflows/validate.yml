@@ -1,0 +1,31 @@
+name: Validate and package skill
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Validate structure and local references
+        run: python scripts/package_skill.py --check
+      - name: Build and verify installable archives
+        run: python scripts/package_skill.py --build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: patent-oa-response-package
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
