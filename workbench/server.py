@@ -156,6 +156,13 @@ class Handler(BaseHTTPRequestHandler):
                 case = self._case(case_id)
                 if not tail:
                     return self._json(case)
+                if tail.startswith('preview/'):
+                    from .preview import render_export
+                    allowed = {entry['name'] for entry in case.get('exports', [])}
+                    folder = (self.server.store.case_dir(case_id) / case.get('export_dir', 'exports')).resolve()
+                    if not folder.is_relative_to(self.server.store.case_dir(case_id)):
+                        raise PermissionError('无效交付目录')
+                    return self._send(render_export(folder, tail[8:], allowed), 'text/html; charset=utf-8')
                 if tail == 'reports/00-family-history.md':
                     from .analysis import analyze_case
                     from .drafting import _write_history

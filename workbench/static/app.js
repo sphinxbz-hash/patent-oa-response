@@ -1,7 +1,7 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const state = { cases: [], current: null, tab: "research", busy: false, dirty: false, drafts: new Map(), metadataDrafts: new Map(), poll: null, loadToken: 0, retry: null, previewId: null };
+const state = { cases: [], current: null, tab: "research", busy: false, dirty: false, drafts: new Map(), metadataDrafts: new Map(), poll: null, loadToken: 0, retry: null, previewId: null, outputCase: null, outputKey: null, outputAbort: null };
 const roleNames = { oa: "审查意见", response: "答复", claims: "权利要求", publication: "公开文本", original: "原始申请", other: "其他" };
 const versionNames = { unknown: "未确认", pending: "当前待审", granted: "授权版本", reference: "参考版本", publication: "公开版本", not_entered: "未进入审查", auxiliary: "辅助请求" };
 const statusNames = { new: "待研究", created: "待研究", idle: "待处理", researching: "研究中", researched: "研究完成", ready: "可处理", generating: "生成中", generated: "已生成", complete: "已完成", completed: "已完成", error: "处理失败", failed: "处理失败", partial: "待补充材料", needs_documents: "待补充材料" };
@@ -110,6 +110,7 @@ function setTab(name) {
   state.tab = name;
   document.querySelectorAll("[role=tab]").forEach((tab) => { const selected = tab.dataset.tab === name; tab.setAttribute("aria-selected", String(selected)); tab.tabIndex = selected ? 0 : -1; });
   ["research", "selection", "output"].forEach((value) => { $(`panel-${value}`).hidden = value !== name; });
+  if (name === "output") loadOutputPreview();
 }
 function renderCase(resetSettings = false) {
   const item = state.current; if (!item) return;
@@ -336,6 +337,50 @@ function exportLabel(name) {
   if (/family|research|report|同族/.test(value)) return "同族研究报告";
   return name;
 }
+const previewLabels = { "Response.docx": "意见陈述书 · 英文", "MarkedClaims.docx": "权利要求修改标记页", "CleanClaims.docx": "修改后清洁稿", "SupportTable.md": "修改依据表", "中文摘要.md": "中文摘要", "00-family-history.md": "同族审查历史", "manual-guide.md": "补充材料指南", "source-record.json": "来源记录", "SupportTable.csv": "修改依据表 · CSV" };
+function prepareOutputReader(exports) {
+  const names = exports.map((file) => file.filename || file.name || file.path?.split(/[\\/]/).pop() || "");
+  const order = Object.keys(previewLabels);
+  const choices = names.filter((name) => /\.(docx|html|md|txt|csv|json)$/i.test(name) && !(/\.html$/i.test(name) && names.includes(name.replace(/\.html$/i, ".docx"))));
+  choices.sort((a, b) => (order.includes(a) ? order.indexOf(a) : 99) - (order.includes(b) ? order.indexOf(b) : 99));
+  const select = $("output-file"); const previous = state.outputCase === state.current.id ? select.value : "";
+  select.replaceChildren(...choices.map((name) => { const option = elt("option", "", previewLabels[name] || exportLabel(name)); option.value = name; return option; }));
+  select.value = choices.includes(previous) ? previous : choices[0] || "";
+  state.outputCase = state.current.id;
+  $("output-reader").hidden = !choices.length; $("all-exports").hidden = !exports.length;
+  if (!choices.length) { state.outputAbort?.abort(); state.outputKey = null; $("output-frame").srcdoc = ""; }
+  else if (state.tab === "output") loadOutputPreview();
+}
+async function loadOutputPreview(force = false) {
+  if (!state.current || $("output-reader").hidden || !$("output-file").value) return;
+  const name = $("output-file").value;
+  const key = `${state.current.id}/${state.current.export_dir || "exports"}/${name}`;
+  if (!force && state.outputKey === key) return;
+  state.outputAbort?.abort();
+  const controller = new AbortController(); state.outputAbort = controller; state.outputKey = key;
+  const frame = $("output-frame"); frame.hidden = true; frame.srcdoc = "";
+  frame.title = `${previewLabels[name] || exportLabel(name)}正文预览`;
+  $("reader-download").href = `${casePath()}/exports/${encodeURIComponent(name)}`;
+  $("reader-download").download = name;
+  $("reader-note").textContent = /\.docx$/i.test(name) ? "正文与本次 Word 文件同步生成；修改标记保留，最终分页以下载的 Word 为准。" : "以下展示本次生成文件的内容；下载可保留原始格式。";
+  $("reader-status").textContent = "正在载入文件…"; $("reader-status").hidden = false;
+  $("reader-retry").hidden = true; $("output-reader").setAttribute("aria-busy", "true");
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(`${casePath()}/preview/${encodeURIComponent(name)}`, { signal: controller.signal, cache: "no-store" });
+    if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || "文件预览暂时不可用，请重试或下载查看。"); }
+    const body = await response.text();
+    if (state.outputAbort !== controller) return;
+    frame.srcdoc = body; frame.hidden = false; $("reader-status").hidden = true;
+  } catch (error) {
+    if (state.outputAbort !== controller) return;
+    $("reader-status").textContent = error.name === "AbortError" ? "预览载入超时，可以重试或下载当前文件。" : error.message;
+    $("reader-retry").hidden = false;
+  } finally {
+    clearTimeout(timer);
+    if (state.outputAbort === controller) $("output-reader").setAttribute("aria-busy", "false");
+  }
+}
 function renderOutputs() {
   const exports = exportRows(); const list = $("export-list"); list.replaceChildren();
   $("output-empty").hidden = exports.length > 0 || state.current.status === "generating";
@@ -344,13 +389,14 @@ function renderOutputs() {
   $("output-summary").replaceChildren();
   if (exports.length && state.current.exports_stale) { const stale = elt("div", "output-note stale-output"); stale.setAttribute("role", "status"); stale.append(elt("strong", "", "材料已更新，请重新生成；以下为上次结果"), elt("p", "", "上次文件与生成说明尚未包含最新材料或编辑。请返回“选择与编辑”，保存并生成新的答复包。")); $("output-summary").append(stale); }
   if (state.current.status === "generating") $("output-summary").append(elt("p", "output-note", "正在生成答复包。进度会自动更新；已有文件若仍显示，属于上一次生成结果。"));
-  else if (exports.length && !state.current.exports_stale) { const count = Array.isArray(state.current.gaps) ? state.current.gaps.length : 0; $("output-summary").append(elt("p", "output-note", `${state.current.is_demo ? "当前为虚构示例。" : ""}已生成文件可下载审阅。${count ? `当前记录 ${count} 项缺件或未核查事项，请一并查看中文摘要。` : "请结合原始材料审阅来源、版本与目标法域要求。"}`)); }
+  else if (exports.length && !state.current.exports_stale) { const count = Array.isArray(state.current.gaps) ? state.current.gaps.length : 0; $("output-summary").append(elt("p", "output-note", `${state.current.is_demo ? "当前为虚构示例。" : ""}可直接预览或下载本次文件。${count ? `当前记录 ${count} 项缺件或未核查事项，请一并查看中文摘要。` : "请结合原始材料审阅来源、版本与目标法域要求。"}`)); }
   exports.forEach((file) => {
     const name = file.filename || file.name || file.path?.split(/[\\/]/).pop() || "";
     if (!name && !file.url) return;
     const row = elt("div", "export-row"); const info = elt("div"); info.append(elt("strong", "", file.label || file.title || exportLabel(name)), elt("p", "", name || "生成文件")); row.append(info);
-    const url = file.url && safeURL(file.url) ? file.url : `${casePath()}/exports/${encodeURIComponent(name)}`; const preview = /\.html?$/i.test(name); appendLink(row, preview ? "预览" : "下载", url, "button secondary", !preview); list.append(row);
+    const url = `${casePath()}/exports/${encodeURIComponent(name)}`; appendLink(row, "下载", url, "button secondary", true); list.append(row);
   });
+  prepareOutputReader(exports);
   const analysis = state.current.analysis; $("analysis-section").hidden = !analysis || (typeof analysis === "object" && !Object.keys(analysis).length); const area = $("analysis-content"); area.replaceChildren();
   if (!analysis) return;
   if (typeof analysis === "string") { area.append(elt("p", "hint", analysis)); return; }
@@ -446,6 +492,8 @@ document.querySelectorAll("[data-tab]").forEach((tab) => { tab.addEventListener(
 document.querySelectorAll("[data-go-tab]").forEach((button) => button.addEventListener("click", () => { setTab(button.dataset.goTab); $(`tab-${button.dataset.goTab}`).focus(); }));
 $("show-upload").addEventListener("click", showUpload); $("hide-upload").addEventListener("click", () => { $("upload-form").hidden = true; });
 $("close-preview").addEventListener("click", () => { state.previewId = null; $("document-preview").hidden = true; });
+$("output-file").addEventListener("change", () => loadOutputPreview());
+$("reader-retry").addEventListener("click", () => loadOutputPreview(true));
 $("document-metadata-form").addEventListener("input", markMetadataDirty); $("document-metadata-form").addEventListener("change", markMetadataDirty);
 $("document-metadata-form").addEventListener("submit", (event) => { event.preventDefault(); perform(saveDocumentMetadata, "metadata-save-button", "正在保存…"); });
 document.querySelectorAll("input[name=upload_mode]").forEach((radio) => radio.addEventListener("change", () => { const file = document.querySelector("input[name=upload_mode]:checked").value === "file"; $("upload-file-area").hidden = !file; $("upload-text-area").hidden = file; }));

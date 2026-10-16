@@ -81,7 +81,15 @@
           </form>
         </section>
         <section id="panel-output" class="tab-panel" role="tabpanel" aria-labelledby="tab-output" hidden>
-          <section class="section"><div class="section-heading"><div><h2>英文答复包</h2><p>包含英文答复、修订权项、清洁权项及修改依据表、中文摘要。</p></div><a id="bundle-link" class="button primary" href="#" hidden>下载完整 ZIP</a></div><div id="output-summary"></div><div id="export-list" class="export-list"></div><div id="output-empty" class="output-empty"><h3>答复包尚未生成</h3><p>选择参考材料后即可生成。材料不足时，系统会输出可生成部分并列明缺件。</p><button type="button" class="primary" data-go-tab="selection">选择材料并生成</button></div></section>
+          <section class="section"><div class="section-heading"><div><h2>英文答复包</h2><p>在此预览正文、修改标记和中文摘要，也可下载原文件。</p></div><a id="bundle-link" class="button primary" href="#" hidden>下载完整 ZIP</a></div><div id="output-summary"></div>
+            <section id="output-reader" class="output-reader" aria-label="答复包文档预览" hidden>
+              <div class="reader-toolbar"><div class="reader-picker"><label for="output-file">预览文件</label><select id="output-file"></select></div><a id="reader-download" class="button secondary" href="#" download>下载当前文件</a></div>
+              <p id="reader-note" class="hint"></p>
+              <div id="reader-status" class="reader-status" role="status" aria-live="polite"></div><button type="button" id="reader-retry" class="secondary" hidden>重试预览</button>
+              <iframe id="output-frame" class="output-frame" title="答复包正文" sandbox="" referrerpolicy="no-referrer" hidden></iframe>
+            </section>
+            <details id="all-exports" class="all-exports" hidden><summary>全部文件与其他格式</summary><div id="export-list" class="export-list"></div></details>
+            <div id="output-empty" class="output-empty"><h3>答复包尚未生成</h3><p>选择参考材料后即可生成。材料不足时，系统会输出可生成部分并列明缺件。</p><button type="button" class="primary" data-go-tab="selection">选择材料并生成</button></div></section>
           <section class="section" id="analysis-section" hidden><div class="section-heading"><div><h2>本次生成说明</h2><p>请结合来源原件审阅草案和未解决事项。</p></div></div><div id="analysis-content"></div></section>
           <div class="panel-footer"><p>需要调整？修改材料选择和文本后，可重新生成。</p><button type="button" class="secondary" data-go-tab="selection">返回编辑</button></div>
         </section>
