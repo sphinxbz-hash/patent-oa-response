@@ -34,3 +34,12 @@
 - 浏览器验证现有虚构案件无需重新生成即可预览；切换依据表、中文摘要和修改标记页时，正文与下载地址同步变化。默认桌面和 390px 窄屏已检查，窄屏主文档宽度为 375px，无主页面水平溢出。
 - 界面检测提示既有表格外层间距、既有米色背景与忙碌状态动画；表格单元格已有内边距，背景遵循 DESIGN.md，状态动画只在任务运行时显示，本次未扩大修改范围。
 - 本机截图：`.impeccable/review/answer-preview-desktop.jpg`、`answer-preview-mobile.jpg`；这些本地验收图片不进入公开提交。此功能核对正文和修改标记，不表示已验证 Word 的实际分页。
+
+## 欧洲案卷整包下载（2026-10-16）
+
+- 根因确认：register.epo.org 的 Cloudflare 人机验证对数据中心 IP 返回 403（"Just a moment..."），urllib/curl 及无头 Chromium 均无法通过；有头浏览器窗口在普通网络下可通过，顽固验证可由用户在窗口内手动完成（等待上限 10 分钟）。
+- 新增 `workbench/ep_zip.py`：可选 Playwright 组件；直连目录失败后回退到真实浏览器，打开 All documents，全选文件并以 ZIP 整包下载。校验 ZIP 魔数、完整性与 PDF 成员；按日期加标题前缀对应目录条目逐件导入；利用 Register 文档代号（1503SS/1703/ABEX/CLMS 等）修正角色分类；未对应文件保留 ZIP 原件并记入日志。
+- 解析器覆盖真实 EP21934362 案卷 ZIP 的命名形态（1503SS、1201-1、RECEIPT-OLF、CLMS-HWA、CLMSABEX、2035-4、2906I、1226CC、重复件尾部 -2 等）。
+- 直连可用时不启动浏览器；`WORKBENCH_EP_BROWSER=0` 可关闭回退；`WORKBENCH_EP_HEADLESS=1` 强制无头；代理读取标准环境变量。
+- 新增 13 项自动测试，完整测试共 76 项通过。
+- 尚未验证：真实 Cloudflare 环境下的端到端自动下载需在普通办公网络实机复核；无头模式在数据中心 IP 仍视为不可用。WIPO/INPI/USPTO 交互式案卷适配器仍未实现。

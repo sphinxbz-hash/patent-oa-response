@@ -1,11 +1,14 @@
 """Bounded family discovery, document downloads and recoverable manual handoff."""
 import json
+import os
 import re
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote, urljoin
-from .retrieval import fetch_public, parse_google_patents, parse_ep_directory, Tree, validate_pdf
+from .retrieval import fetch_public, parse_google_patents, parse_ep_directory, Tree, validate_pdf, classify_document
 from .storage import now
+from . import ep_zip
 
 
 def choose_cycle(documents):
@@ -111,17 +114,87 @@ def ingest_google_page(store, case_id, html, url, fetch=fetch_public, download=T
     return parsed
 
 
+def _import_ep_zip(store, case_id, application, zip_path, rows):
+    """Import a whole-dossier ZIP: match members to doclist rows (date + title),
+    store each matched PDF under the row's identity, and report the rest."""
+    with zipfile.ZipFile(zip_path) as zf:
+        names = [n for n in zf.namelist() if n.lower().endswith('.pdf')]
+        matched = ep_zip.match_members(names, rows)
+        count, skipped = 0, []
+        for row in rows:
+            name = matched.get(row['id'])
+            if not name:
+                continue
+            current = next((d for d in store.get(case_id)['documents'] if d['id'] == row['id']), None)
+            if current is None or current.get('status') in ('downloaded', 'imported'):
+                continue
+            data = zf.read(name)
+            try:
+                validate_pdf(data)
+            except ValueError:
+                skipped.append(name)
+                continue
+            parsed = ep_zip.parse_member_name(name) or {}
+            meta = dict(row, filename=f"EP-{row.get('date') or 'undated'}-{row['title'][:65]}.pdf", source_url=row.get('url') or '')
+            if current.get('role') == 'other':
+                meta['role'] = ep_zip.role_for_member(parsed.get('codes', []), parsed.get('title', ''), classify_document)
+            imported = store.import_document(case_id, data, meta)
+            def replace(case, row_id=row['id'], imported=imported):
+                original = next((d for d in case['documents'] if d['id'] == row_id), None)
+                imported.update(status='downloaded', download_url=str(zip_path))
+                if original:
+                    original.update({k: v for k, v in imported.items() if k != 'id'})
+                    case['documents'] = [d for d in case['documents'] if d['id'] != imported['id']]
+            store.update(case_id, replace)
+            count += 1
+    leftover = [n for n in names if n not in matched.values()]
+    if leftover:
+        store.log(case_id, f'整包中 {len(leftover)} 件未能对应目录条目（标题截断或日期漂移），已保留 ZIP 原件供人工核对')
+    if skipped:
+        store.log(case_id, f'整包中 {len(skipped)} 件未通过 PDF 校验，未导入')
+    return count
+
+
 def research_ep(store, case_id, application, fetch):
     url = f'https://register.epo.org/application?number={application}&lng=en&tab=doclist'
     store.log(case_id, f'正在读取欧洲案卷目录 {application}')
     try:
-        raw, final, _ = fetch(url)
-        docs = parse_ep_directory(raw.decode('utf-8', errors='replace'), application)
+        html, final = None, url
+        try:
+            raw, final, _ = fetch(url)
+            candidate = raw.decode('utf-8', errors='replace')
+            if 'documentId=' in candidate:
+                html = candidate
+            else:
+                store.log(case_id, '欧洲案卷目录直接访问未取得有效内容（可能被人机验证拦截）')
+        except Exception as exc:
+            store.log(case_id, f'欧洲案卷目录直接访问失败：{str(exc)[:160]}')
+        zip_path = None
+        browser_enabled = os.environ.get('WORKBENCH_EP_BROWSER', '1') != '0'
+        if html is None and browser_enabled:
+            # 直连失败（典型：Cloudflare 拦截数据中心 IP）才回退浏览器整包下载。
+            if ep_zip.available():
+                try:
+                    result = ep_zip.fetch_ep_dossier_via_browser(
+                        application, store.case_dir(case_id) / 'downloads',
+                        log=lambda m: store.log(case_id, m))
+                    html = result['html'] or None
+                    zip_path = result['zip']
+                except Exception as exc:
+                    store.log(case_id, f'浏览器整包下载未成功：{str(exc)[:200]}；转为逐件下载与人工补件')
+            else:
+                store.log(case_id, '未安装可选组件 playwright，跳过浏览器整包下载（pip install playwright && playwright install chromium 可启用）')
+        if html is None:
+            raise ValueError('欧洲案卷目录暂不可访问')
+        docs = parse_ep_directory(html, application)
         if not docs:
             raise ValueError('未解析到目录文件，不能据此判断案卷为空')
         rows = [store.add_discovered(case_id, d) for d in docs]
         cycle = choose_cycle(rows)
         store.update(case_id, lambda c: c.setdefault('cycles', []).append({'application': application, 'source_url': final, 'retrieved_at': now(), 'directory_count': len(rows), 'latest_oa_id': (cycle['latest_oa'] or {}).get('id'), 'response_id': (cycle['response'] or {}).get('id'), 'response_oa_id': (cycle['response_oa'] or {}).get('id'), 'pairing_status': cycle['pairing_status']}))
+        if zip_path:
+            count = _import_ep_zip(store, case_id, application, zip_path, rows)
+            store.log(case_id, f'欧洲案卷整包导入 {count} 件（共 {len(rows)} 项目录）')
         store.log(case_id, f'欧洲案卷目录 {len(rows)} 项；开始取得最新实质意见及最近答复轮次')
         selected = [cycle['latest_oa'], cycle['response'], cycle['latest_response'], cycle['response_oa']] + cycle['claims']
         seen = set()
