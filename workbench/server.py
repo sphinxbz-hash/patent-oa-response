@@ -71,13 +71,12 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
         directory = 'exports/' + uuid.uuid4().hex[:12]
         folder = self.store.case_dir(case_id) / directory
         folder.mkdir(parents=True)
-        result = generate_package(case, folder)
+        result = generate_package(case, folder, self.store.case_dir(case_id))
         exports = result['exports']
         for entry in exports:
             entry['url'] = f"/api/cases/{case_id}/exports/{quote(entry['name'])}"
-        bundles = list(folder.glob('*.zip'))
-        bundle = bundles[0] if bundles else folder / 'bundle.zip'
-        if not bundles:
+        bundle = folder / '00-完整答复包.zip'
+        if not bundle.is_file():
             with zipfile.ZipFile(bundle, 'w', zipfile.ZIP_DEFLATED) as archive:
                 for path in folder.iterdir():
                     if path.is_file() and path.suffix != '.zip':
@@ -163,13 +162,13 @@ class Handler(BaseHTTPRequestHandler):
                     if not folder.is_relative_to(self.server.store.case_dir(case_id)):
                         raise PermissionError('无效交付目录')
                     return self._send(render_export(folder, tail[8:], allowed), 'text/html; charset=utf-8')
-                if tail == 'reports/00-family-history.md':
+                if tail == 'reports/01-同族审查历史报告.md':
                     from .analysis import analyze_case
                     from .drafting import _write_history
                     folder = self.server.store.case_dir(case_id) / 'reports'
                     folder.mkdir(exist_ok=True)
                     _write_history(case, analyze_case(case), folder)
-                    return self._file(folder / '00-family-history.md')
+                    return self._file(folder / '01-同族审查历史报告.md')
                 if tail.startswith('files/'):
                     docid = tail[6:]
                     doc = next((d for d in case['documents'] if d['id'] == docid), None)

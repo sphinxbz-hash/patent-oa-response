@@ -193,7 +193,7 @@ def _write_response(case, analysis, folder, has_claims=False):
     if deadline['nominal_date']:
         output.paragraph('Nominal date: ' + deadline['nominal_date'] + '. Rule source: ' + deadline['rule_source_url'])
     output.paragraph(deadline['fee']['explanation'])
-    output.save(folder, 'Response')
+    output.save(folder, '03-意见陈述书')
 
 
 def _write_claims(case, analysis, folder, proposed, before, user_authored):
@@ -240,8 +240,8 @@ def _write_claims(case, analysis, folder, proposed, before, user_authored):
             else:
                 prefix = f'{number}. (Currently amended) ' if is_us else f'{number}. '
                 marked.runs(prefix, diff_tokens(old or '', new or ''))
-    marked.save(folder, 'MarkedClaims')
-    clean.save(folder, 'CleanClaims')
+    marked.save(folder, '04-权利要求修改标记页')
+    clean.save(folder, '05-修改后权利要求清洁稿')
 
 
 def _md(value):
@@ -276,8 +276,8 @@ def _write_support(analysis, folder, is_demo=False):
     lines += ['| ' + ' | '.join(_md(row.get(key, '')) for key in columns) + ' |' for row in rows]
     if not rows:
         lines += ['', 'No amendment support rows are available.']
-    (folder / 'SupportTable.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
-    with (folder / 'SupportTable.csv').open('w', encoding='utf-8-sig', newline='') as handle:
+    (folder / '06-修改依据表.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    with (folder / '06-修改依据表.csv').open('w', encoding='utf-8-sig', newline='') as handle:
         csv_columns = columns + ['case_notice'] if is_demo else columns
         writer = csv.DictWriter(handle, fieldnames=csv_columns, extrasaction='ignore')
         writer.writeheader()
@@ -379,7 +379,7 @@ def _write_history(case, analysis, folder):
                      ' | ' + str(cycle.get('source_url') or '来源链接未记录'))
     lines += ['', '最新审查意见是否已有答复尚需具体轮次证据；按日期归组的候选不等于已核实的对应关系。', '', '## 未解决的材料缺口', '']
     lines += ['- ' + gap for gap in analysis['gaps']]
-    (folder / '00-family-history.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    (folder / '01-同族审查历史报告.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
 def _write_summary(case, analysis, folder):
@@ -394,7 +394,7 @@ def _write_summary(case, analysis, folder):
         lines.append('- ' + label + '：' + _source_label(sources[key]))
     settings = case.get('settings') or {}
     lines += ['', '## 修改与审阅状态', '',
-              '修改痕迹按目标英文在审基线生成。' if analysis['baseline_usable'] else '缺少可用的目标英文在审基线，MarkedClaims 仅提供参考文本，不声称目标修改痕迹。',
+              '修改痕迹按目标英文在审基线生成。' if analysis['baseline_usable'] else '缺少可用的目标英文在审基线，修改标记页仅提供参考文本，不声称目标修改痕迹。',
               '启用了可选人工审阅。' if settings.get('review_enabled') else '未启用可选人工审阅；生成不会被该选项阻挡。']
     if settings.get('response_override') or settings.get('claims_override'):
         lines.append('导出中已标注用户自写的答复或权利要求替换文本。')
@@ -411,7 +411,7 @@ def _write_summary(case, analysis, folder):
                      '。起算公告是否适用及节假日顺延尚未核实，不是已核定期限。')
     lines += ['', '## 待补材料和核实事项', ''] + ['- ' + gap for gap in analysis['gaps']]
     lines += ['', '英文答复保留来源的技术论证，不自动判断新颖性、创造性或新增事项。修改依据仅核对用户指定的目标原始文件页内引文，不作法律充分性结论。']
-    (folder / '中文摘要.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    (folder / '07-中文摘要.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
 def _write_manual_guide(case, analysis, folder):
@@ -442,10 +442,45 @@ def _write_manual_guide(case, analysis, folder):
               '- INPI patents: https://www.gov.br/inpi/pt-br/servicos/patentes',
               '- USPTO Patent Center: https://patentcenter.uspto.gov/',
               '', '## Remaining gaps', ''] + ['- ' + gap for gap in analysis['gaps']]
-    (folder / 'manual-guide.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    (folder / '08-补充材料指南.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
-def generate_package(case, out_dir: Path):
+def _write_originals_bundle(case, folder, case_dir):
+    """02-同族原件与目录说明.zip: every obtained family OA/response/claims
+    original plus a catalog, mirroring the trial-delivery evidence folder."""
+    target = str(case.get('target_country') or '').upper()
+    originals = [d for d in case.get('documents', [])
+                 if d.get('local_path') and d.get('status') in ('downloaded', 'imported')
+                 and d.get('role') in ('oa', 'response', 'claims')
+                 and str(d.get('country', '')).upper() != target]
+    originals.sort(key=lambda d: (d.get('country', ''), d.get('date', ''), d.get('title', '')))
+    base = Path(case_dir) if case_dir else Path(folder).resolve().parents[1]
+    lines = ['# 同族审查意见与答复原件 · 目录说明', '',
+             '本 ZIP 收录研究过程中实际取得的同族官方原件；本案（目标法域）材料请在案件“材料”区查看。',
+             '未取得原件的同族以补件指南为准，不以公开文本冒充案卷文件。', '',
+             '| 文件 | 法域 | 日期 | 角色 | 来源 | SHA256 |', '|---|---|---|---|---|---|']
+    roles = {'oa': '审查意见', 'response': '申请人答复', 'claims': '权利要求'}
+    members = []
+    for doc in originals:
+        path = (base / doc['local_path']).resolve()
+        if not path.is_file() or not path.is_relative_to(base):
+            continue
+        name = doc.get('filename') or path.name
+        members.append((path, name))
+        lines.append('| {name} | {country} | {date} | {role} | {url} | {sha} |'.format(
+            name=name, country=doc.get('country', ''), date=doc.get('date', ''),
+            role=roles.get(doc.get('role'), doc.get('role', '')),
+            url=doc.get('url', ''), sha=str(doc.get('sha256', ''))[:16]))
+    if not members:
+        lines.append('| （本案件尚未取得同族原件） | | | | | |')
+    with zipfile.ZipFile(Path(folder) / '02-同族原件与目录说明.zip', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('00-目录说明.md', '\n'.join(lines) + '\n')
+        for path, name in members:
+            archive.write(path, arcname=name)
+    return len(members)
+
+
+def generate_package(case, out_dir: Path, case_dir=None):
     """Write a complete draft package even when evidence is incomplete."""
     folder = Path(out_dir)
     folder.mkdir(parents=True, exist_ok=True)
@@ -468,7 +503,7 @@ def generate_package(case, out_dir: Path):
     _write_summary(case, analysis, folder)
     _write_manual_guide(case, analysis, folder)
     if case.get('is_demo'):
-        for name in ('SupportTable.md', '中文摘要.md', 'manual-guide.md'):
+        for name in ('06-修改依据表.md', '07-中文摘要.md', '08-补充材料指南.md'):
             path = folder / name
             path.write_text(DEMO_NOTICE + '\n\n' + path.read_text(encoding='utf-8'), encoding='utf-8')
     source_record = dict(is_demo=bool(case.get('is_demo')), case_notice=DEMO_NOTICE if case.get('is_demo') else '',
@@ -477,14 +512,16 @@ def generate_package(case, out_dir: Path):
                          family=case.get('family') or [], documents=case.get('documents') or [],
                          events=case.get('events') or [], settings=case.get('settings') or {}, analysis=analysis,
                          method='deterministic_rules_no_llm')
-    (folder / 'source-record.json').write_text(json.dumps(source_record, ensure_ascii=False, indent=2), encoding='utf-8')
-    labels = [('00-family-history.md', '同族历史报告'), ('Response.docx', '英文答复 Word'), ('Response.html', '英文答复预览'),
-              ('MarkedClaims.docx', '修改痕迹权利要求 Word'), ('MarkedClaims.html', '修改痕迹预览'),
-              ('CleanClaims.docx', '清洁版权利要求 Word'), ('CleanClaims.html', '清洁版权利要求预览'),
-              ('SupportTable.md', '修改依据表'), ('SupportTable.csv', '修改依据表 CSV'),
-              ('中文摘要.md', '中文摘要'), ('source-record.json', '来源记录'), ('manual-guide.md', '补充材料指南')]
-    with zipfile.ZipFile(folder / 'bundle.zip', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+    (folder / '09-来源记录.json').write_text(json.dumps(source_record, ensure_ascii=False, indent=2), encoding='utf-8')
+    originals_count = _write_originals_bundle(case, folder, case_dir)
+    labels = [('01-同族审查历史报告.md', '同族审查历史报告'), ('02-同族原件与目录说明.zip', f'同族原件包（{originals_count} 件+目录说明）'),
+              ('03-意见陈述书.docx', '意见陈述书 Word'), ('03-意见陈述书.html', '意见陈述书预览'),
+              ('04-权利要求修改标记页.docx', '权利要求修改标记页 Word'), ('04-权利要求修改标记页.html', '修改标记页预览'),
+              ('05-修改后权利要求清洁稿.docx', '清洁版权利要求 Word'), ('05-修改后权利要求清洁稿.html', '清洁版权利要求预览'),
+              ('06-修改依据表.md', '修改依据表'), ('06-修改依据表.csv', '修改依据表 CSV'),
+              ('07-中文摘要.md', '中文摘要'), ('09-来源记录.json', '来源记录'), ('08-补充材料指南.md', '补充材料指南')]
+    with zipfile.ZipFile(folder / '00-完整答复包.zip', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         for name, _ in labels:
             archive.write(folder / name, arcname=name)
-    labels.append(('bundle.zip', '完整答复包 ZIP'))
+    labels.insert(0, ('00-完整答复包.zip', '完整答复包 ZIP（含以上全部）'))
     return dict(exports=[dict(name=name, label=label) for name, label in labels], analysis=analysis, gaps=analysis['gaps'])

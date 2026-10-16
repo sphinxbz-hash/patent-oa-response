@@ -19,7 +19,7 @@ class ResearchTests(unittest.TestCase):
 
     def test_research_invalidates_previous_exports_even_when_download_fails(self):
         case = self.store.create('BR112023019754A2')
-        self.store.update(case['id'], lambda c: c.update(exports=[{'name':'bundle.zip'}], exports_stale=False))
+        self.store.update(case['id'], lambda c: c.update(exports=[{'name':'00-完整答复包.zip'}], exports_stale=False))
         self.module.research_case(self.store, case['id'], fetch=lambda url: (_ for _ in ()).throw(OSError('blocked')))
         self.assertTrue(self.store.get(case['id'])['exports_stale'])
 

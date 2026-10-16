@@ -221,33 +221,33 @@ class DraftingTests(unittest.TestCase):
         result = self.generate(case, self.output)
         self.assertEqual(case, before)
         names = {x['name'] for x in result['exports']}
-        self.assertTrue({'Response.docx', 'Response.html', 'MarkedClaims.docx', 'MarkedClaims.html',
-                         'CleanClaims.docx', 'CleanClaims.html', 'SupportTable.md',
-                         'SupportTable.csv', '中文摘要.md', '00-family-history.md',
-                         'source-record.json', 'manual-guide.md', 'bundle.zip'} <= names)
-        response = Document(self.output / 'Response.docx')
+        self.assertTrue({'03-意见陈述书.docx', '03-意见陈述书.html', '04-权利要求修改标记页.docx', '04-权利要求修改标记页.html',
+                         '05-修改后权利要求清洁稿.docx', '05-修改后权利要求清洁稿.html', '06-修改依据表.md',
+                         '06-修改依据表.csv', '07-中文摘要.md', '01-同族审查历史报告.md',
+                         '09-来源记录.json', '08-补充材料指南.md', '00-完整答复包.zip'} <= names)
+        response = Document(self.output / '03-意见陈述书.docx')
         self.assertEqual(response.paragraphs[0].style.name, 'Title')
         text = '\n'.join(p.text for p in response.paragraphs)
         self.assertIn('Applicant submits that the cited document does not disclose the controller.', text)
         self.assertIn('Applicant argument', text)
         self.assertNotIn('Chinese', text)
-        marked = Document(self.output / 'MarkedClaims.docx')
+        marked = Document(self.output / '04-权利要求修改标记页.docx')
         self.assertTrue(any(run.underline for p in marked.paragraphs for run in p.runs))
-        clean = Document(self.output / 'CleanClaims.docx')
+        clean = Document(self.output / '05-修改后权利要求清洁稿.docx')
         self.assertFalse(any(run.underline or run.font.strike for p in clean.paragraphs for run in p.runs))
-        self.assertIn('目标', (self.output / '中文摘要.md').read_text(encoding='utf-8'))
-        with zipfile.ZipFile(self.output / 'bundle.zip') as package:
-            self.assertNotIn('bundle.zip', package.namelist())
-            self.assertIn('Response.docx', package.namelist())
+        self.assertIn('目标', (self.output / '07-中文摘要.md').read_text(encoding='utf-8'))
+        with zipfile.ZipFile(self.output / '00-完整答复包.zip') as package:
+            self.assertNotIn('00-完整答复包.zip', package.namelist())
+            self.assertIn('03-意见陈述书.docx', package.namelist())
         self.generate(case, self.output)
-        with zipfile.ZipFile(self.output / 'bundle.zip') as package:
-            self.assertNotIn('bundle.zip', package.namelist())
+        with zipfile.ZipFile(self.output / '00-完整答复包.zip') as package:
+            self.assertNotIn('00-完整答复包.zip', package.namelist())
 
     def test_missing_target_baseline_never_creates_false_target_redline(self):
         case = example_case()
         case['documents'] = [d for d in case['documents'] if d['id'] != 'br-pending']
         result = self.generate(case, self.output)
-        html = (self.output / 'MarkedClaims.html').read_text(encoding='utf-8')
+        html = (self.output / '04-权利要求修改标记页.html').read_text(encoding='utf-8')
         self.assertIn('No target redline', html)
         self.assertNotIn('<ins>', html)
         self.assertTrue(any('pending' in gap.lower() for gap in result['gaps']))
@@ -258,7 +258,7 @@ class DraftingTests(unittest.TestCase):
         case['settings']['claims_override'] = '1. A converter with a controller.\n2. The converter of claim 1 with a sensor and a switch.'
         result = self.generate(case, self.output)
         self.assertTrue(any('support' in gap.lower() and '2' in gap for gap in result['gaps']))
-        summary = (self.output / '中文摘要.md').read_text(encoding='utf-8')
+        summary = (self.output / '07-中文摘要.md').read_text(encoding='utf-8')
         self.assertIn('缺少已定位原始依据的权利要求：2', summary)
 
     def test_missing_proposed_claims_does_not_invent_cancellations_in_support_table(self):
@@ -266,7 +266,7 @@ class DraftingTests(unittest.TestCase):
         case['documents'] = [d for d in case['documents'] if d['id'] != 'ep-grant']
         result = self.generate(case, self.output)
         self.assertFalse(any(row['change'] == 'Canceled claim' for row in result['analysis']['support']))
-        response = (self.output / 'Response.html').read_text(encoding='utf-8')
+        response = (self.output / '03-意见陈述书.html').read_text(encoding='utf-8')
         self.assertNotIn('Please consider the accompanying amended claims', response)
         self.assertIn('no amendment is asserted', response)
 
@@ -276,7 +276,7 @@ class DraftingTests(unittest.TestCase):
         case['documents'][0].update(text=paragraph, pages=[{'number': 5, 'text': paragraph}])
         case['researched_at'] = '2026-10-16T01:02:03+00:00'
         self.generate(case, self.output)
-        history = (self.output / '00-family-history.md').read_text(encoding='utf-8')
+        history = (self.output / '01-同族审查历史报告.md').read_text(encoding='utf-8')
         self.assertIn('可复用论证清单', history)
         self.assertIn(paragraph, history)
         self.assertIn('第 5 页', history)
@@ -291,7 +291,7 @@ class DraftingTests(unittest.TestCase):
             url='https://patentscope.wipo.int/search/en/search.jsf', instruction='Use Documents to retrieve the recorded written opinion.',
             files=[dict(title='Written opinion', date='2025-01-02', url='https://example.org/opinion', status='manual_required')])]
         self.generate(case, self.output)
-        guide = (self.output / 'manual-guide.md').read_text(encoding='utf-8')
+        guide = (self.output / '08-补充材料指南.md').read_text(encoding='utf-8')
         self.assertIn('PCT/AA2020/123456', guide)
         self.assertIn('Use Documents to retrieve the recorded written opinion.', guide)
         self.assertIn('Written opinion | 2025-01-02', guide)
@@ -309,14 +309,14 @@ class DraftingTests(unittest.TestCase):
                     self.assertEqual(Document(path).paragraphs[1].text, notice)
                 elif path.suffix in ('.md', '.html', '.csv', '.json'):
                     self.assertIn(notice, path.read_text(encoding='utf-8-sig'))
-        record = json.loads((self.output / 'source-record.json').read_text(encoding='utf-8'))
+        record = json.loads((self.output / '09-来源记录.json').read_text(encoding='utf-8'))
         self.assertTrue(record.get('is_demo'))
 
     def test_missing_response_does_not_invent_substantive_arguments(self):
         case = example_case()
         case['documents'] = [d for d in case['documents'] if d['role'] != 'response']
         self.generate(case, self.output)
-        html = (self.output / 'Response.html').read_text(encoding='utf-8')
+        html = (self.output / '03-意见陈述书.html').read_text(encoding='utf-8')
         self.assertIn('No source backed argument', html)
         self.assertNotIn('does not disclose', html)
 
@@ -325,11 +325,11 @@ class DraftingTests(unittest.TestCase):
         case['settings'].update(response_override='User argument <script>alert(1)</script>',
                                 claims_override='1. A converter with a user supplied circuit.')
         self.generate(case, self.output)
-        html = (self.output / 'Response.html').read_text(encoding='utf-8')
+        html = (self.output / '03-意见陈述书.html').read_text(encoding='utf-8')
         self.assertIn('User authored', html)
         self.assertIn('&lt;script&gt;', html)
         self.assertNotIn('<script>', html)
-        clean = (self.output / 'CleanClaims.html').read_text(encoding='utf-8')
+        clean = (self.output / '05-修改后权利要求清洁稿.html').read_text(encoding='utf-8')
         self.assertIn('user supplied circuit', clean)
         self.assertIn('User authored', clean)
 
@@ -340,7 +340,7 @@ class DraftingTests(unittest.TestCase):
             result = self.generate(case, self.output)
         except ValueError:
             self.fail('Malformed claims should create an explicit package gap, not stop generation')
-        self.assertIn('No numbered proposed claims', (self.output / 'CleanClaims.html').read_text(encoding='utf-8'))
+        self.assertIn('No numbered proposed claims', (self.output / '05-修改后权利要求清洁稿.html').read_text(encoding='utf-8'))
         self.assertTrue(any('parse' in gap.lower() for gap in result['gaps']))
 
     def test_response_adapts_exact_identity_preserves_original_and_flags_foreign_law(self):
@@ -349,15 +349,51 @@ class DraftingTests(unittest.TestCase):
                     'The controller differs from EP7654321A1. EP22123456.10 is another identifier.')
         case['documents'][0]['text'] = original
         result = self.generate(case, self.output)
-        text = '\n'.join(p.text for p in Document(self.output / 'Response.docx').paragraphs)
+        text = '\n'.join(p.text for p in Document(self.output / '03-意见陈述书.docx').paragraphs)
         self.assertIn('Application BR112023000001 meets Article 56 EPC.', text)
         self.assertIn('EP22123456.10 is another identifier.', text)
         self.assertIn('controller differs from EP7654321A1', text)
         self.assertIn('Please consider the accompanying amended claims and following observations.', text)
-        record = json.loads((self.output / 'source-record.json').read_text(encoding='utf-8'))
+        record = json.loads((self.output / '09-来源记录.json').read_text(encoding='utf-8'))
         self.assertEqual(record['documents'][0]['text'], original)
         self.assertTrue(result['analysis']['adaptation']['log'])
         self.assertTrue(any('EPC' in gap for gap in result['gaps']))
+
+    def test_originals_bundle_collects_family_evidence_with_catalog(self):
+        import io
+        from pypdf import PdfWriter
+        from workbench.storage import Store
+        store = Store(ROOT / 'workbench-data' / 'test-runs' / uuid.uuid4().hex)
+        case = store.create('BR112023019754A2')
+        buffer = io.BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        writer.write(buffer)
+        data = buffer.getvalue()
+        store.import_document(case['id'], data, {'filename': 'EP-2024-11-21-European search opinion.pdf',
+            'title': 'European search opinion', 'role': 'oa', 'country': 'EP', 'date': '2024-11-21',
+            'source_url': 'https://register.epo.org/example'})
+        store.import_document(case['id'], data, {'filename': 'BR-2025-11-18-Parecer.pdf',
+            'title': 'Parecer tecnico', 'role': 'oa', 'country': 'BR', 'date': '2025-11-18'})
+        self.generate(store.get(case['id']), self.output, store.case_dir(case['id']))
+        bundle = self.output / '02-同族原件与目录说明.zip'
+        self.assertTrue(bundle.is_file())
+        with zipfile.ZipFile(bundle) as package:
+            names = package.namelist()
+            self.assertIn('EP-2024-11-21-European search opinion.pdf', names)
+            self.assertIn('00-目录说明.md', names)
+            # 本案（目标法域）材料留在案件材料区，不混进同族原件包。
+            self.assertNotIn('BR-2025-11-18-Parecer.pdf', names)
+            catalog = package.read('00-目录说明.md').decode('utf-8')
+        self.assertIn('European search opinion', catalog)
+        self.assertIn('https://register.epo.org/example', catalog)
+
+    def test_originals_bundle_without_evidence_is_explicit(self):
+        case = example_case()
+        self.generate(case, self.output)
+        with zipfile.ZipFile(self.output / '02-同族原件与目录说明.zip') as package:
+            catalog = package.read('00-目录说明.md').decode('utf-8')
+        self.assertIn('尚未取得同族原件', catalog)
 
     def test_us_listing_has_statuses_clean_new_claims_and_canceled_number_only(self):
         case = example_case()
@@ -367,7 +403,7 @@ class DraftingTests(unittest.TestCase):
                 doc['country'] = 'US'
         case['settings']['claims_override'] = '1. A converter with a controller.\n3. A newly added device.'
         self.generate(case, self.output)
-        doc = Document(self.output / 'MarkedClaims.docx')
+        doc = Document(self.output / '04-权利要求修改标记页.docx')
         paras = [p for p in doc.paragraphs if p.text.startswith(('1.', '2.', '3.'))]
         self.assertTrue(any('1. (Currently amended)' in p.text for p in paras))
         self.assertEqual(next(p.text for p in paras if p.text.startswith('2.')), '2. (Canceled)')

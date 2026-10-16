@@ -121,7 +121,7 @@ function renderCase(resetSettings = false) {
   $("case-status").className = `badge ${working() ? "busy" : ["error", "failed"].includes(item.status) ? "error-state" : item.exports_stale ? "warning" : hasExports(item) || ["generated", "complete", "completed"].includes(item.status) ? "success" : ""}`;
   $("demo-badge").hidden = !(item.is_demo || item.demo);
   $("case-meta").replaceChildren(elt("span", "", `目标：${item.target_country || "未指定"} ${item.target_application || "· 申请号待确认"}`), elt("span", "", "输出：英文 / 中文摘要"), elt("span", "", `更新 ${dateLabel(item.updated_at, true)}`));
-  $("family-history-link").href = `${casePath()}/reports/00-family-history.md`;
+  $("family-history-link").href = `${casePath()}/reports/01-同族审查历史报告.md`;
   $("upload-country").placeholder = `例如 ${item.target_country || "BR"} / EP`;
   renderProgress(); renderFamily(); renderDocuments(); renderGaps(); renderEvents(); renderOutputs();
   if (resetSettings || !state.dirty) renderSettings();
@@ -337,7 +337,7 @@ function exportLabel(name) {
   if (/family|research|report|同族/.test(value)) return "同族研究报告";
   return name;
 }
-const previewLabels = { "Response.docx": "意见陈述书 · 英文", "MarkedClaims.docx": "权利要求修改标记页", "CleanClaims.docx": "修改后清洁稿", "SupportTable.md": "修改依据表", "中文摘要.md": "中文摘要", "00-family-history.md": "同族审查历史", "manual-guide.md": "补充材料指南", "source-record.json": "来源记录", "SupportTable.csv": "修改依据表 · CSV" };
+const previewLabels = { "03-意见陈述书.docx": "意见陈述书 · 英文", "04-权利要求修改标记页.docx": "权利要求修改标记页", "05-修改后权利要求清洁稿.docx": "修改后清洁稿", "06-修改依据表.md": "修改依据表", "07-中文摘要.md": "中文摘要", "01-同族审查历史报告.md": "同族审查历史", "08-补充材料指南.md": "补充材料指南", "09-来源记录.json": "来源记录", "06-修改依据表.csv": "修改依据表 · CSV", "02-同族原件与目录说明.zip": "同族原件包", "00-完整答复包.zip": "完整答复包" };
 function prepareOutputReader(exports) {
   const names = exports.map((file) => file.filename || file.name || file.path?.split(/[\\/]/).pop() || "");
   const order = Object.keys(previewLabels);
