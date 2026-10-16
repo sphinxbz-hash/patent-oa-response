@@ -1,6 +1,7 @@
 """Local HTTP interface. Case files never leave this machine on import/export."""
 import base64
 import binascii
+import hashlib
 import json
 import mimetypes
 import os
@@ -15,9 +16,16 @@ from urllib.parse import urlparse, unquote, quote
 
 from .storage import MAX_BYTES, Store
 from .research import research_case
+from . import __version__
 
 STATIC = Path(__file__).parent / 'static'
 SETTING_KEYS = {'source_member', 'selected_response_id', 'selected_claims_id', 'pending_claims_id', 'target_oa_id', 'original_id', 'review_enabled', 'response_override', 'claims_override', 'support_rows', 'deadline'}
+
+
+def instance_info(data_dir):
+    identity = os.path.normcase(str(Path(data_dir).resolve()))
+    return {'service': 'patent-oa-response-workbench', 'version': __version__,
+            'data_root': hashlib.sha256(identity.encode('utf-8')).hexdigest()}
 
 
 class WorkbenchHTTPServer(ThreadingHTTPServer):
@@ -138,6 +146,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._guard()
             path = unquote(urlparse(self.path).path)
+            if path == '/api/health':
+                return self._json(instance_info(self.server.store.root))
             if path == '/api/cases':
                 return self._json({'cases': self.server.store.list()})
             match = re.fullmatch(r'/api/cases/([a-f0-9]{16})(?:/(.*))?', path)
