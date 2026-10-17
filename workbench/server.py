@@ -45,12 +45,15 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
                 raise RuntimeError('该案件已有任务正在运行，请等待完成')
             if len(self.jobs) >= 6:
                 raise RuntimeError('已有多个案件正在处理，请稍后再试')
-            self.store.update(case_id, lambda c: c.update(status='researching' if operation == 'research' else 'generating', last_error=''))
+            self.store.update(case_id, lambda c: c.update(status={'research': 'researching', 'ocr': 'ocr', 'generate': 'generating'}[operation], last_error=''))
             def work():
                 try:
                     with self.capacity:
                         if operation == 'research':
                             research_case(self.store, case_id)
+                            self.recognize(case_id)
+                        elif operation == 'ocr':
+                            self.recognize(case_id)
                         else:
                             self.generate(case_id)
                 except Exception as exc:
@@ -64,8 +67,18 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
             self.jobs[case_id] = thread
             thread.start()
 
+    def recognize(self, case_id, finish_status='idle'):
+        self.store.update(case_id, lambda c: c.update(status='ocr'))
+        self.store.ocr_case(case_id)
+        current = self.store.get(case_id)
+        count = sum((d.get('ocr') or {}).get('ocr_pages', 0) for d in current['documents'])
+        failed = sum((d.get('ocr') or {}).get('status') in ('partial', 'failed', 'unavailable') for d in current['documents'])
+        self.store.update(case_id, lambda c: c.update(status=finish_status))
+        self.store.log(case_id, f'扫描材料处理结束：{count} 页已有 OCR 文字；{failed} 份文件未完成或需重试。低置信度提示请见材料详情。')
+
     def generate(self, case_id):
         from .drafting import generate_package
+        self.recognize(case_id, finish_status='generating')
         case = self.store.get(case_id)
         self.store.log(case_id, '正在整理证据和生成英文答复包')
         directory = 'exports/' + uuid.uuid4().hex[:12]
@@ -87,6 +100,9 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
                     path = (self.store.case_dir(case_id) / document['local_path']).resolve()
                     if path.is_relative_to(self.store.case_dir(case_id)) and path.is_file():
                         archive.write(path, 'originals/' + path.name)
+                    if document.get('pages'):
+                        from .ocr import labelled_text
+                        archive.writestr('extracted-text/' + document['id'] + '.txt', labelled_text(document))
         self.store.update(case_id, lambda c: c.update(status='idle', exports=exports, exports_stale=False, export_dir=directory, bundle_name=bundle.name, analysis=result['analysis'], gaps=result['gaps'], last_error=''))
         self.store.log(case_id, f'答复包已生成：{len(exports)} 个可打开文件；缺口已列入中文摘要')
 
@@ -178,6 +194,12 @@ class Handler(BaseHTTPRequestHandler):
                     if not file.is_relative_to(self.server.store.case_dir(case_id)):
                         raise PermissionError('无效文件路径')
                     return self._file(file, doc.get('filename'))
+                if tail.startswith('text/'):
+                    from .ocr import labelled_text
+                    doc = next((d for d in case['documents'] if d['id'] == tail[5:]), None)
+                    if not doc or not doc.get('local_path'):
+                        raise FileNotFoundError('未找到已取得的材料')
+                    return self._send(labelled_text(doc).encode('utf-8'), 'text/plain; charset=utf-8', filename=doc['id'] + '.txt')
                 if tail == 'bundle' or tail.startswith('exports/'):
                     filename = case.get('bundle_name', '') if tail == 'bundle' else tail[8:]
                     allowed = {e['name'] for e in case.get('exports', [])} | {case.get('bundle_name', '')}
@@ -216,12 +238,13 @@ class Handler(BaseHTTPRequestHandler):
                 case = create_demo(self.server.store)
                 self.server.start_job(case['id'], 'generate')
                 return self._json(self._case(case['id']), 201)
-            match = re.fullmatch(r'/api/cases/([a-f0-9]{16})/(settings|documents|research|generate)(?:/([a-f0-9]{16}))?', path)
+            match = re.fullmatch(r'/api/cases/([a-f0-9]{16})/(settings|documents|research|generate|ocr)(?:/([a-f0-9]{16}))?', path)
             if not match:
                 raise FileNotFoundError('接口不存在')
             case_id, action, document_id = match.groups()
             case = self._case(case_id)
-            if action in ('research', 'generate'):
+            auto_ocr = False
+            if action in ('research', 'generate', 'ocr'):
                 self.server.start_job(case_id, action)
             else:
                 with self.server.store.lock:
@@ -244,6 +267,12 @@ class Handler(BaseHTTPRequestHandler):
                         content = str(data['text']).encode('utf-8') if 'text' in data else base64.b64decode(data.get('data_base64', ''), validate=True)
                         self.server.store.import_document(case_id, content, data)
                         self.server.store.log(case_id, f"已补充文件 {data.get('filename', 'document.txt')}")
+                        auto_ocr = str(data.get('filename', '')).lower().endswith('.pdf') and case['status'] == 'idle'
+            if auto_ocr:
+                try:
+                    self.server.start_job(case_id, 'ocr')
+                except RuntimeError:
+                    self.server.store.log(case_id, '材料已保存；当前任务结束后可点击“识别扫描材料”补做 OCR。')
             return self._json(self._case(case_id))
         except Exception as exc:
             self._error(exc)
@@ -297,6 +326,6 @@ def create_demo(store):
 def make_server(store, port=8765):
     server = WorkbenchHTTPServer(('127.0.0.1', port), store)
     for case in store.list():
-        if case['status'] in ('researching', 'generating'):
+        if case['status'] in ('researching', 'generating', 'ocr'):
             store.update(case['id'], lambda c: c.update(status='idle', last_error='上次服务中断；可重新检索或生成'))
     return server

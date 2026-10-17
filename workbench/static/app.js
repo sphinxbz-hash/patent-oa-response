@@ -7,7 +7,8 @@ const versionNames = { unknown: "未确认", pending: "当前待审", granted: "
 const statusNames = { new: "待研究", created: "待研究", idle: "待处理", researching: "研究中", researched: "研究完成", ready: "可处理", generating: "生成中", generated: "已生成", complete: "已完成", completed: "已完成", error: "处理失败", failed: "处理失败", partial: "待补充材料", needs_documents: "待补充材料" };
 const sourceFields = { "selected-response": "selected_response_id", "selected-claims": "selected_claims_id", "pending-claims": "pending_claims_id", "target-oa": "target_oa_id", "original-document": "original_id" };
 const acceptedRoles = { selected_response_id: ["response"], selected_claims_id: ["claims"], pending_claims_id: ["claims"], target_oa_id: ["oa"], original_id: ["original"] };
-const working = () => ["researching", "generating"].includes(state.current?.status);
+statusNames.ocr = "正在识别文字";
+const working = () => ["researching", "generating", "ocr"].includes(state.current?.status);
 const hasExports = (item) => Boolean(item?.has_exports || (Array.isArray(item?.exports) ? item.exports.length : item?.exports && Object.keys(item.exports).length));
 const caseStatusLabel = (item) => item?.status === "idle" && hasExports(item) ? (item.exports_stale ? "待重新生成" : "已生成") : statusNames[item?.status] || item?.status || "待处理";
 const text = (value) => value == null ? "" : typeof value === "string" ? value : typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
@@ -42,6 +43,7 @@ function clearMessages() { $("error-banner").hidden = true; $("notice").hidden =
 function updateControls() {
   for (const id of ["create-button", "demo-button", "upload-button", "save-button", "refresh-cases"]) $(id).disabled = state.busy;
   $("research-button").disabled = state.busy || working();
+  $("ocr-button").disabled = state.busy || working() || !docs().some((d) => hasOriginal(d) && /\.pdf$/i.test(d.local_path || d.filename || ""));
   $("generate-button").disabled = state.busy || working();
   document.querySelectorAll(".case-item").forEach((button) => { button.disabled = state.busy; });
   document.querySelectorAll("#settings-form input, #settings-form select, #settings-form textarea, #settings-form button, #upload-form input, #upload-form select, #upload-form textarea, #upload-form button").forEach((control) => { control.disabled = state.busy; });
@@ -132,7 +134,7 @@ function eventText(event) { return typeof event === "string" ? event : event.mes
 function renderProgress() {
   const events = state.current.events || [];
   $("job-progress").hidden = !working();
-  $("progress-label").textContent = state.current.status === "generating" ? "正在生成英文答复包" : "正在研究同族与审查材料";
+  $("progress-label").textContent = state.current.status === "ocr" ? "正在识别扫描材料" : state.current.status === "generating" ? "正在生成英文答复包" : "正在研究同族与审查材料";
   $("progress-detail").textContent = events.length ? eventText(events[events.length - 1]) : "任务已开始，正在等待来源返回。";
 }
 function emptyTable(tbody, message, columns) { const row = elt("tr"); const cell = elt("td", "table-empty", message); cell.colSpan = columns; row.append(cell); tbody.append(row); }
@@ -166,6 +168,7 @@ function renderDocuments() {
     if (hasOriginal(doc) && !text(doc.text).trim()) status.append(elt("p", "status-note", "未提取到文字，需补充可读文本"));
     const actions = elt("td"); const links = elt("div", "inline-links"); const preview = elt("button", "text-button", "详情"); preview.type = "button"; preview.addEventListener("click", () => previewDocument(doc.id)); links.append(preview);
     if (hasOriginal(doc)) appendLink(links, doc.status === "imported" ? "导入原件" : "原件", fileURL(doc), "", true);
+    if (doc.ocr) { const ocrStatus = doc.ocr.status === "not_needed" ? "文字已提取" : doc.ocr.status === "complete" ? `OCR ${doc.ocr.ocr_pages} 页` : "文字识别待完成"; title.append(elt("span", "table-sub", ocrStatus + (doc.ocr.review_pages?.length ? " · 部分页面需核对" : ""))); }
     if (doc.url || doc.source_url) appendLink(links, "来源", doc.url || doc.source_url);
     actions.append(links); row.append(title, kind, elt("td", "", versionNames[doc.version_status] || doc.version_status || "未确认"), status, actions); rows.append(row);
   });
@@ -178,9 +181,10 @@ function previewDocument(id, scroll = true) {
   $("preview-meta").textContent = `${doc.country || "法域未知"} · ${roleNames[doc.role] || doc.role || "其他"} · ${versionNames[doc.version_status] || "版本未确认"} · ${dateLabel(doc.date)}`;
   $("preview-links").replaceChildren();
   if (hasOriginal(doc)) appendLink($("preview-links"), "下载保存的原件", fileURL(doc), "", true);
+  if (doc.pages?.length) appendLink($("preview-links"), "下载分页文字 TXT", `${casePath()}/text/${encodeURIComponent(doc.id)}`, "", true);
   if (doc.url || doc.source_url) appendLink($("preview-links"), "打开原始来源", doc.url || doc.source_url);
   $("preview-notes").textContent = Array.isArray(doc.notes) ? doc.notes.map(text).join("\n") : text(doc.notes);
-  $("preview-text").textContent = text(doc.text).trim() || (hasOriginal(doc) ? "未取得可读取的正文。若原件为扫描件，请另行粘贴经过核对的文字，并保留原始材料作为来源。" : "当前仅有来源记录，尚未取得原件。请通过来源链接下载后导入。") ;
+  $("preview-text").textContent = doc.pages?.length ? doc.pages.map((page) => `--- 第 ${page.number || "?"} 页 · ${page.method === "ocr" ? "OCR" : page.method === "failed" ? "识别失败" : page.method === "unavailable" ? "待 OCR" : "原文提取"} ---\n${text(page.text).trim() || "[未取得文字]"}`).join("\n\n") : text(doc.text).trim() || (hasOriginal(doc) ? "未取得可读取的正文。可以点击“识别扫描材料”重试，或补充经过核对的文字。" : "当前仅有来源记录，尚未取得原件。请通过来源链接下载后导入。") ;
   const key = `${state.current.id}/${id}`; const draft = state.metadataDrafts.get(key);
   if (previous !== id || !draft) {
     const values = draft || doc;
@@ -236,6 +240,8 @@ function gapLabel(value) {
   if (missing) return `所选${names[missing[1]]}已不可用，本次未自动替换为其他材料。`;
   if (incompatible) return `所选${names[incompatible[1]]}的类型、同族、版本、语言或取得状态不符合要求，或未提取到文字。请核对材料。`;
   const scan = message.match(/^(.+) has no extracted text; a scan may require OCR or manual text entry\.$/);
+  const ocrGap = message.match(/^OCR source (.+):/);
+  if (ocrGap) { const doc = docs().find((item) => item.id === ocrGap[1]); return `${doc?.title || "来源材料"}：部分页面未识别或置信度较低，请查看材料详情并对照原件核对。`; }
   if (scan) { const doc = docs().find((item) => item.id === scan[1]); return `${doc?.title || doc?.filename || "已取得的材料"}未提取到文字；扫描件需补充识别后的文本或手动录入。`; }
   const foreign = message.match(/^Foreign legal or procedural references remain unresolved: (.+)\. No local law substitution was made\.$/);
   if (foreign) return `以下外国法律或程序引述尚待处理：${foreign[1]}。本次未将其替换为目标法域法律。`;
@@ -488,6 +494,7 @@ $("retry-button").addEventListener("click", () => { if (state.retry) state.retry
 $("dismiss-error").addEventListener("click", () => { $("error-banner").hidden = true; });
 $("mobile-sidebar-toggle").addEventListener("click", () => { const sidebar = document.querySelector(".sidebar"); const collapsed = sidebar.classList.toggle("is-collapsed"); $("mobile-sidebar-toggle").setAttribute("aria-expanded", String(!collapsed)); $("mobile-sidebar-toggle").textContent = collapsed ? "案件管理" : "收起案件"; });
 $("research-button").addEventListener("click", () => perform(async () => { rememberDraft(); const item = await request(`${casePath()}/research`, {}); applyCase(item, false); }, "research-button", "正在启动…"));
+$("ocr-button").addEventListener("click", () => perform(async () => { rememberDraft(); const item = await request(`${casePath()}/ocr`, {}); applyCase(item, false); }, "ocr-button", "正在启动识别…"));
 document.querySelectorAll("[data-tab]").forEach((tab) => { tab.addEventListener("click", () => setTab(tab.dataset.tab)); tab.addEventListener("keydown", (event) => { const order = ["research", "selection", "output"]; const index = order.indexOf(tab.dataset.tab); let next; if (event.key === "ArrowRight") next = (index + 1) % order.length; if (event.key === "ArrowLeft") next = (index + order.length - 1) % order.length; if (event.key === "Home") next = 0; if (event.key === "End") next = order.length - 1; if (next !== undefined) { event.preventDefault(); setTab(order[next]); $(`tab-${order[next]}`).focus(); } }); });
 document.querySelectorAll("[data-go-tab]").forEach((button) => button.addEventListener("click", () => { setTab(button.dataset.goTab); $(`tab-${button.dataset.goTab}`).focus(); }));
 $("show-upload").addEventListener("click", showUpload); $("hide-upload").addEventListener("click", () => { $("upload-form").hidden = true; });

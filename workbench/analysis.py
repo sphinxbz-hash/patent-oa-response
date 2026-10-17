@@ -300,6 +300,9 @@ def analyze_case(case):
         if source is None:
             gaps.append(f'Missing usable {labels[key]}.')
     for document in documents:
+        recognition = document.get('ocr') or {}
+        if recognition.get('status') in ('partial', 'failed', 'unavailable') or recognition.get('review_pages') or recognition.get('empty_pages'):
+            gaps.append(f'OCR source {document.get("id", "Document")}: some pages are unreadable or require verification against the original PDF.')
         if document.get('requires_clean_text'):
             gaps.append(f'Marked source {document.get("id", "Document")}: clean text required before claims or response reuse.')
         if document.get('status') in ('downloaded', 'imported') and not document_text(document):

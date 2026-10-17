@@ -3,9 +3,13 @@ import json
 import threading
 import unittest
 import uuid
+import time
+import base64
+import zipfile
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+from unittest.mock import patch
 from workbench.storage import Store
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +57,47 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(HTTPError) as error:
             self.request('/api/cases', {'application_number':'CN117691670A','auto_research':False}, {'Origin':'https://evil.example'})
         self.assertEqual(error.exception.code, 403)
+
+    def test_pdf_import_automatically_extracts_scan_and_text_download_has_page_labels(self):
+        from workbench.tests.test_ocr import pdf_fixture, recognized
+        from workbench import ocr
+        case = self.request('/api/cases', {'application_number': 'BR112023019754A2', 'auto_research': False})
+        path = '/api/cases/' + case['id']
+        with patch.object(ocr, 'available', return_value=True), patch.object(ocr, '_recognize_page', return_value=recognized()):
+            self.request(path + '/documents', {'filename': 'scan.pdf', 'data_base64': base64.b64encode(pdf_fixture()).decode(), 'country': 'EP', 'role': 'oa'})
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                case = self.request(path)
+                if case['status'] == 'idle' and case['documents'][0].get('ocr'):
+                    break
+                time.sleep(0.02)
+        doc = case['documents'][0]
+        self.assertEqual(doc.get('ocr', {}).get('ocr_pages'), 1)
+        with urlopen(self.base + path + '/text/' + doc['id']) as response:
+            body = response.read().decode('utf-8')
+        self.assertIn('第 2 页', body)
+        self.assertIn('intermittent', body)
+        self.assertTrue(doc['local_path'].startswith('originals/'))
+        self.server.generate(case['id'])
+        case = self.request(path)
+        with zipfile.ZipFile(self.store.case_dir(case['id']) / case['export_dir'] / case['bundle_name']) as archive:
+            self.assertIn('intermittent', archive.read('extracted-text/' + doc['id'] + '.txt').decode('utf-8'))
+
+    def test_ocr_action_can_backfill_existing_pdf(self):
+        from workbench.tests.test_ocr import pdf_fixture, recognized
+        from workbench import ocr
+        case = self.store.create('BR112023019754A2')
+        self.store.import_document(case['id'], pdf_fixture(), {'filename': 'old.pdf', 'role': 'oa', 'country': 'EP'})
+        path = '/api/cases/' + case['id']
+        with patch.object(ocr, 'available', return_value=True), patch.object(ocr, '_recognize_page', return_value=recognized()):
+            self.request(path + '/ocr', {})
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                case = self.request(path)
+                if case['status'] == 'idle' and case['documents'][0].get('ocr'):
+                    break
+                time.sleep(0.02)
+        self.assertIn('intermittent', case['documents'][0]['text'])
 
     def test_path_and_invalid_settings_rejected(self):
         case = self.request('/api/cases', {'application_number':'CN117691670A','auto_research':False})

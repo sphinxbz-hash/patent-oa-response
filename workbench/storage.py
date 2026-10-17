@@ -191,6 +191,45 @@ class Store:
             case['exports_stale'] = bool(case.get('exports'))
         return self.update(case_id, edit)
 
+    def ocr_case(self, case_id):
+        from .ocr import cache_version, recognize_pdf
+
+        priority = {'oa': 0, 'response': 1, 'claims': 2, 'original': 3, 'publication': 4}
+        documents = sorted(self.get(case_id)['documents'], key=lambda d: (priority.get(d.get('role'), 5), bool(d.get('requires_clean_text'))))
+        for doc in documents:
+            if not doc.get('local_path') or Path(doc['local_path']).suffix.lower() != '.pdf':
+                continue
+            previous = doc.get('ocr') or {}
+            if previous.get('version') == cache_version() and previous.get('status') in ('complete', 'not_needed'):
+                continue
+            path = (self.case_dir(case_id) / doc['local_path']).resolve()
+            if not path.is_relative_to(self.case_dir(case_id)):
+                raise PermissionError('无效原件路径')
+            self.log(case_id, '正在识别扫描材料：' + doc['title'])
+            try:
+                data = path.read_bytes()
+                if hashlib.sha256(data).hexdigest() != doc['sha256']:
+                    raise ValueError('原件 SHA256 不一致，未执行 OCR')
+                result = recognize_pdf(data, self.root / '.ocr-cache',
+                                       log=lambda message: self.log(case_id, doc['title'][:65] + ' · ' + message))
+            except Exception as exc:
+                self.log(case_id, f'OCR 未完成 {doc["title"]}：{str(exc)[:200]}')
+                result = {'status': 'failed', 'version': cache_version(), 'notes': ['OCR：' + str(exc)[:250]]}
+            def apply(case):
+                current = next((d for d in case['documents'] if d['id'] == doc['id']), None)
+                if current is None:
+                    return
+                if 'pages' in result:
+                    # Full OCR line geometry stays in the page cache, not every API poll.
+                    pages = [{**{k: v for k, v in p.items() if k != 'lines'}, 'line_count': len(p.get('lines', []))} for p in result['pages']]
+                    current.update(text=result['text'], pages=pages)
+                current['ocr'] = {k: v for k, v in result.items() if k not in ('pages', 'text', 'notes')}
+                current['ocr']['processed_at'] = now()
+                current['notes'] = [n for n in current.get('notes', []) if not n.startswith(('扫描件或无可提取文字', 'OCR：'))] + result['notes']
+                case['exports_stale'] = bool(case.get('exports'))
+            self.update(case_id, apply)
+        return self.get(case_id)
+
     def add_discovered(self, case_id, doc):
         doc = dict(doc)
         doc.setdefault('id', uuid.uuid4().hex[:16])
