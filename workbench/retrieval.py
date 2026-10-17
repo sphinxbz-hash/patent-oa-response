@@ -1,4 +1,5 @@
 """Public-source access and parsers. Responses remain evidence, never instructions."""
+import json
 import re
 import shutil
 import subprocess
@@ -6,7 +7,7 @@ import tempfile
 from pathlib import Path
 from urllib.error import URLError, HTTPError
 from html.parser import HTMLParser
-from urllib.parse import urlparse, urljoin, parse_qs
+from urllib.parse import urlparse, urljoin, parse_qs, quote
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from datetime import datetime
 
@@ -187,6 +188,56 @@ def parse_google_patents(html, source_url):
 
 def prop_shallow(node, name):
     return any(isinstance(c, Node) and c.attrs.get('itemprop') == name for c in node.children)
+
+
+def _identifier_key(value):
+    # Punctuation and a document kind suffix are not part of the serial number.
+    # The application serial itself is retained (including EP/CN check digits).
+    compact = re.sub(r'[^A-Z0-9]', '', str(value).upper())
+    return re.sub(r'(?<=\d)[A-Z]\d?$', '', compact)
+
+
+def fetch_google_page(number, fetch=fetch_public, log=lambda message: None):
+    """Resolve an application to a publication using observed search metadata.
+
+    Search ranking alone is never evidence of identity. Confirm the input against
+    the publication page's own application/publication fields before ingestion.
+    """
+    initial = f'https://patents.google.com/patent/{quote(number, safe="")}/en'
+    try:
+        result = fetch(initial)
+        parsed = parse_google_patents(result[0].decode('utf-8', errors='replace'), result[1])
+        if parsed['publication'] and any(_identifier_key(number) == _identifier_key(parsed[key])
+                                         for key in ('publication', 'application')):
+            return result
+        raise ValueError('直达页未返回与输入号码对应的公开书目')
+    except Exception as exc:
+        log(f'号码直达页未取得：{str(exc)[:160]}；正在查询对应公开号')
+
+    search_url = 'https://patents.google.com/xhr/query?url=' + quote('q=' + number, safe='') + '&exp='
+    raw, _, _ = fetch(search_url)
+    payload = json.loads(raw.decode('utf-8'))
+    candidates = []
+    for cluster in payload.get('results', {}).get('cluster', []):
+        for hit in cluster.get('result', []):
+            publication = hit.get('patent', {}).get('publication_number', '')
+            if (not hit.get('is_similar_document') and
+                    re.fullmatch(r'[A-Z]{2}\d{5,16}[A-Z]\d?', publication) and
+                    publication not in candidates):
+                candidates.append(publication)
+    for publication in candidates[:3]:
+        url = f'https://patents.google.com/patent/{publication}/en'
+        try:
+            result = fetch(url)
+            parsed = parse_google_patents(result[0].decode('utf-8', errors='replace'), result[1])
+            if parsed['publication'] == publication and any(
+                    _identifier_key(number) == _identifier_key(parsed[key])
+                    for key in ('publication', 'application')):
+                log(f'通过申请号查询确认公开号：{number} → {publication}；书目：{result[1]}')
+                return result
+        except Exception as exc:
+            log(f'候选公开号 {publication} 未核验：{str(exc)[:120]}')
+    raise ValueError(f'未找到与 {number} 精确对应的公开书目；请核对号码或补充公开号，不将相似结果当作同族')
 
 
 def parse_ep_directory(html, application):

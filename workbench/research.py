@@ -6,7 +6,7 @@ import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote, urljoin
-from .retrieval import fetch_public, parse_google_patents, parse_ep_directory, Tree, validate_pdf, classify_document
+from .retrieval import fetch_public, fetch_google_page, parse_google_patents, parse_ep_directory, Tree, validate_pdf, classify_document
 from .storage import now
 from . import ep_zip
 
@@ -240,12 +240,12 @@ def research_case(store, case_id, fetch=fetch_public):
     store.update(case_id, lambda c: c.update(status='researching', last_error='', exports_stale=bool(c.get('exports'))))
     store.log(case_id, f'开始同族研究：{number}')
     try:
-        initial_url = f'https://patents.google.com/patent/{quote(number, safe="")}/en'
         parsed_pages = []
         try:
-            raw, url, _ = fetch(initial_url)
+            raw, url, _ = fetch_google_page(number, fetch, log=lambda message: store.log(case_id, message))
             parsed_pages.append(ingest_google_page(store, case_id, raw.decode('utf-8', errors='replace'), url, fetch))
         except Exception as exc:
+            store.update(case_id, lambda c: c.update(last_error=f'同族书目检索失败：{str(exc)[:220]}'))
             store.log(case_id, f'书目及同族自动检索未成功：{str(exc)[:220]}；可在浏览器查找并补充材料')
         family = store.get(case_id)['family']
         # Fetch one representative per application/country, preferring B documents for reference.
@@ -291,6 +291,8 @@ def research_case(store, case_id, fetch=fetch_public):
         gaps = []
         if not current['family']:
             gaps.append('尚未核验同族；可手动查找后补充文件，不将查询失败解释为没有同族')
+        if current.get('last_error'):
+            gaps.append(current['last_error'])
         if not any(d.get('country') == current['target_country'] and d['role'] == 'oa' and d.get('text') for d in current['documents']):
             gaps.append('缺少本案可读取的审查意见')
         if not any(d.get('country') == current['target_country'] and d['role'] == 'claims' and d.get('version_status') == 'pending' for d in current['documents']):
