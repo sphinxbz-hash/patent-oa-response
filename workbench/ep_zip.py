@@ -27,8 +27,8 @@ _UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 # Document-code hints from EP Register ZIP member names, e.g.
 # 21934362-2024-11-21-1503SS-Supplementary European search report.pdf
 EP_CODE_ROLES = {
-    '1503SS': 'oa', '1703': 'oa', '1224': 'oa', '1503': 'oa',
-    'ABEX': 'response', 'MEPA': 'response',
+    '1503SS': 'oa', '1703': 'oa', '1224': 'other', '1503': 'oa',
+    'ABEX': 'response', 'MEPA': 'other',
     'CLMS': 'claims', 'CLMSABEX': 'claims', 'CLMS-HWA': 'claims',
     'ISR': 'oa', 'IPRP': 'oa',
 }
@@ -229,7 +229,7 @@ def parse_member_name(name):
 
 
 def role_for_member(codes, title, classify):
-    """Document-code hint first (it is authoritative EP metadata), title fallback."""
+    """Map observed document-code hints, keeping administrative forms separate."""
     for code in codes if isinstance(codes, (list, tuple)) else [codes]:
         if code in EP_CODE_ROLES:
             return EP_CODE_ROLES[code]

@@ -87,6 +87,12 @@ class ParseMemberNameTests(unittest.TestCase):
         self.assertEqual(role(['CLMSABEX'], 'anything', classify_document), 'claims')
         self.assertEqual(role(['XYZ9'], 'Reply to examination report', classify_document), 'response')
 
+    def test_maintenance_codes_are_administrative_not_substantive(self):
+        from workbench.retrieval import classify_document
+        role = self.module.role_for_member
+        self.assertEqual(role(['MEPA'], 'Maintenance of the application', classify_document), 'other')
+        self.assertEqual(role(['1224'], 'Invitation to declare maintenance of the application', classify_document), 'other')
+
 
 class ValidateZipTests(unittest.TestCase):
     def setUp(self):
@@ -223,6 +229,26 @@ class ResearchEpZipIntegrationTests(unittest.TestCase):
         current = self.store.get(case['id'])
         self.assertTrue(any('浏览器整包下载未成功' in e['message'] for e in current['events']))
         self.assertTrue(any('暂不可访问' in e['message'] for e in current['events']))
+
+    def test_zip_imported_cycle_keeps_claim_version_and_response_link(self):
+        case = self.store.create('BR112023019754A2')
+        directory = self._doclist([
+            ('OA1', '21.11.2024', 'European search opinion'),
+            ('REPLY1', '09.05.2025', 'Amendments received before examination'),
+            ('CLAIMS1', '09.05.2025', 'Amended claims filed after receipt of (European) search report')])
+        zip_path = self.store.case_dir(case['id']) / 'dossier.zip'
+        self._zip_with(zip_path, [REAL_MEMBER_NAMES[1], REAL_MEMBER_NAMES[2], REAL_MEMBER_NAMES[4]])
+        with patch.object(self.ep_zip, 'available', return_value=True), \
+             patch.object(self.ep_zip, 'fetch_ep_dossier_via_browser', return_value={'html': directory, 'zip': zip_path}):
+            self.research.research_ep(self.store, case['id'], 'EP21934362',
+                                      lambda url: (_ for _ in ()).throw(OSError('403')))
+        current = self.store.get(case['id'])
+        claims = next(d for d in current['documents'] if d['role'] == 'claims')
+        response = next(d for d in current['documents'] if d['role'] == 'response')
+        self.assertEqual(claims['status'], 'downloaded')
+        self.assertEqual(claims['version_status'], 'reference')
+        self.assertEqual(claims.get('cycle_id'), response['id'])
+        self.assertEqual(response.get('cycle_id'), response['id'])
 
 
 if __name__ == '__main__':

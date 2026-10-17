@@ -228,6 +228,12 @@ class Store:
                 current['notes'] = [n for n in current.get('notes', []) if not n.startswith(('扫描件或无可提取文字', 'OCR：'))] + result['notes']
                 case['exports_stale'] = bool(case.get('exports'))
             self.update(case_id, apply)
+        # Cached OCR skips recognition, but must still repair evidence metadata.
+        from .metadata import enrich_case_documents
+        changes = []
+        self.update(case_id, lambda c: changes.append(enrich_case_documents(c)))
+        if changes[0]:
+            self.log(case_id, f'已补全 {changes[0]} 项来源元数据（正文语言推断 / 同局同日候选轮次）；保留人工指定值')
         return self.get(case_id)
 
     def add_discovered(self, case_id, doc):

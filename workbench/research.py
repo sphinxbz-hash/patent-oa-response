@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote, urljoin
 from .retrieval import fetch_public, fetch_google_page, parse_google_patents, parse_ep_directory, Tree, validate_pdf, classify_document
 from .storage import now
+from .metadata import enrich_case_documents
 from . import ep_zip
 
 
@@ -195,6 +196,9 @@ def research_ep(store, case_id, application, fetch):
         if zip_path:
             count = _import_ep_zip(store, case_id, application, zip_path, rows)
             store.log(case_id, f'欧洲案卷整包导入 {count} 件（共 {len(rows)} 项目录）')
+        # Persist pairing/version metadata for ZIP imports as well as direct PDFs.
+        # Already downloaded rows are skipped below, not skipped by this handoff.
+        store.update(case_id, enrich_case_documents)
         store.log(case_id, f'欧洲案卷目录 {len(rows)} 项；开始取得最新实质意见及最近答复轮次')
         selected = [cycle['latest_oa'], cycle['response'], cycle['latest_response'], cycle['response_oa']] + cycle['claims']
         seen = set()
@@ -202,16 +206,9 @@ def research_ep(store, case_id, application, fetch):
             if not doc or doc['id'] in seen:
                 continue
             seen.add(doc['id'])
-            if next(d for d in store.get(case_id)['documents'] if d['id'] == doc['id'])['status'] in ('downloaded', 'imported'):
+            doc = next(d for d in store.get(case_id)['documents'] if d['id'] == doc['id'])
+            if doc['status'] in ('downloaded', 'imported'):
                 continue
-            if doc['role'] == 'response':
-                doc['cycle_id'] = doc['id']
-            elif doc in cycle['claims'] or doc == cycle['response_oa']:
-                doc['cycle_id'] = (cycle['response'] or {}).get('id', '')
-            else:
-                doc['cycle_id'] = ''
-            if doc['role'] == 'claims':
-                doc['version_status'] = 'reference'
             # Follow observed viewer iframe rather than guessing a PDF endpoint.
             try:
                 body, viewer_url, content_type = fetch(doc['url'])

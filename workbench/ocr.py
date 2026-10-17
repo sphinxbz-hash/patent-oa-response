@@ -26,7 +26,7 @@ def cache_version():
         renderer = version('pypdfium2')
     except PackageNotFoundError:
         engine, renderer = 'missing', 'missing'
-    return f'v1-rapidocr-{engine}-pdfium-{renderer}-{DPI}dpi'
+    return f'v2-upright-first-rapidocr-{engine}-pdfium-{renderer}-{DPI}dpi'
 
 
 def native_usable(text):
@@ -35,16 +35,59 @@ def native_usable(text):
             text.count('\ufffd') < max(2, len(text) // 50) and '(cid:' not in text)
 
 
-def _recognize_page(data, index):
-    import pypdfium2 as pdfium
+def _engine():
     from rapidocr import RapidOCR
-
     global _ENGINE
+    if _ENGINE is None:
+        _ENGINE = RapidOCR(params={'EngineConfig.onnxruntime.intra_op_num_threads': 2,
+                                  'EngineConfig.onnxruntime.inter_op_num_threads': 1,
+                                  'Global.log_level': 'warning'})
+    return _ENGINE
+
+
+def _retry_lines(image, lines, legacy=False):
+    """Try original/angle-corrected crops only for suspect lines; keep evidence."""
+    for line in lines:
+        if line['confidence'] >= .85 or not line.get('box'):
+            continue
+        xs, ys = zip(*line['box'])
+        bounds = (max(0, math.floor(min(xs)) - 2), max(0, math.floor(min(ys)) - 2),
+                  min(image.width, math.ceil(max(xs)) + 2), min(image.height, math.ceil(max(ys)) + 2))
+        if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+            continue
+        crop = image.crop(bounds)
+        try:
+            for classify in ([False, True] if legacy else [True]):
+                # All stages are explicit: RapidOCR persists call-time options.
+                try:
+                    output = _engine()(crop, use_det=False, use_cls=classify, use_rec=True, text_score=0)
+                except Exception as exc:
+                    line['orientation_retry_error'] = str(exc)[:200]
+                    continue  # Keep the first reading if an optional retry fails.
+                if not output.txts or not output.scores or not output.txts[0].strip():
+                    continue
+                score = float(output.scores[0])
+                if score > line['confidence'] + .02:
+                    line.setdefault('previous_text', line['text'])
+                    line.setdefault('previous_confidence', line['confidence'])
+                    line.update(text=str(output.txts[0]), confidence=score, orientation_retry=True,
+                                retry_orientation='classified' if classify else 'upright')
+                if score >= .99:
+                    break
+        finally:
+            crop.close()
+    return lines
+
+
+def _line_result(lines):
+    return {'text': '\n'.join(line['text'] for line in lines), 'lines': lines,
+            'confidence': sum(line['confidence'] for line in lines) / len(lines) if lines else 0,
+            'orientation_retry_errors': sum(bool(line.get('orientation_retry_error')) for line in lines)}
+
+
+def _with_page_image(data, index, read):
+    import pypdfium2 as pdfium
     with _LOCK:
-        if _ENGINE is None:
-            _ENGINE = RapidOCR(params={'EngineConfig.onnxruntime.intra_op_num_threads': 2,
-                                      'EngineConfig.onnxruntime.inter_op_num_threads': 1,
-                                      'Global.log_level': 'warning'})
         pdf = pdfium.PdfDocument(data)
         try:
             page = pdf[index]
@@ -55,13 +98,9 @@ def _recognize_page(data, index):
                 try:
                     image = bitmap.to_pil().convert('RGB')
                     try:
-                        output = _ENGINE(image)
-                        lines = [{'text': str(text), 'confidence': float(score), 'box': box.tolist()}
-                                 for text, score, box in zip(output.txts or (), output.scores or (), output.boxes if output.boxes is not None else ())]
-                        return {'text': '\n'.join(line['text'] for line in lines), 'lines': lines,
-                                'confidence': sum(line['confidence'] for line in lines) / len(lines) if lines else 0,
-                                'image_size': list(image.size), 'box_unit': 'image_pixels_top_left',
-                                'page_size_points': [width, height]}
+                        result = read(image)
+                        return dict(result, image_size=list(image.size), box_unit='image_pixels_top_left',
+                                    page_size_points=[width, height])
                     finally:
                         image.close()
                 finally:
@@ -70,6 +109,41 @@ def _recognize_page(data, index):
                 page.close()
         finally:
             pdf.close()
+
+
+def _recognize_page(data, index):
+    def read(image):
+        # The angle classifier can falsely flip normal long English lines.
+        # Start upright and only retry suspect lines, retaining both readings.
+        output = _engine()(image, use_det=True, use_cls=False, use_rec=True, text_score=0)
+        lines = [{'text': str(text), 'confidence': float(score), 'box': box.tolist()}
+                 for text, score, box in zip(output.txts or (), output.scores or (),
+                                            output.boxes if output.boxes is not None else ())]
+        return _line_result(_retry_lines(image, lines))
+    return _with_page_image(data, index, read)
+
+
+def _upgrade_legacy_page(data, index, cached):
+    # Same PDF hash/DPI/models: reuse detection and good lines from v1.
+    lines = [dict(line) for line in cached['lines']]
+    if any(line['confidence'] < .85 for line in lines):
+        def read(image):
+            if list(image.size) != cached.get('image_size'):
+                raise ValueError('Legacy OCR image dimensions differ')
+            return _line_result(_retry_lines(image, lines, legacy=True))
+        result = _with_page_image(data, index, read)
+    else:
+        result = dict(cached, **_line_result(lines))
+    result['quality_upgrade'] = 'v1_cached_boxes'
+    return result
+
+
+def _read_cache(path, number):
+    cached = json.loads(path.read_text(encoding='utf-8'))
+    if (not isinstance(cached.get('text'), str) or cached.get('method') != 'ocr' or
+            cached.get('number') != number or not isinstance(cached.get('lines'), list)):
+        raise ValueError('Invalid OCR cache')
+    return cached
 
 
 def recognize_pdf(data, cache_dir, log=lambda message: None):
@@ -96,14 +170,16 @@ def recognize_pdf(data, cache_dir, log=lambda message: None):
             else:
                 cache = folder / f'{index + 1}.json'
                 try:
-                    cached = json.loads(cache.read_text(encoding='utf-8'))
-                    if (not isinstance(cached.get('text'), str) or cached.get('method') != 'ocr' or
-                            cached.get('number') != index + 1 or not isinstance(cached.get('lines'), list)):
-                        raise ValueError('Invalid OCR cache')
+                    cached = _read_cache(cache, index + 1)
                     record.update(cached, cached=True)
                 except (OSError, ValueError, TypeError, AttributeError):
                     try:
-                        output = _recognize_page(data, index)
+                        legacy_version = 'v1-rapidocr-' + cache_version().split('-rapidocr-', 1)[1]
+                        legacy = Path(cache_dir) / legacy_version / digest / f'{index + 1}.json'
+                        try:
+                            output = _upgrade_legacy_page(data, index, _read_cache(legacy, index + 1))
+                        except (OSError, ValueError, TypeError, AttributeError, KeyError):
+                            output = _recognize_page(data, index)
                         quality = ('no_text' if not output['text'].strip() else
                                    'review' if output['confidence'] < 0.85 or any(line['confidence'] < 0.85 for line in output['lines']) else 'ok')
                         record.update(output, method='ocr', quality=quality)
@@ -114,8 +190,9 @@ def recognize_pdf(data, cache_dir, log=lambda message: None):
                     except Exception as exc:
                         record.update(method='failed', quality='review', error=str(exc)[:250])
         pages.append(record)
+        ocr_label = ('读取缓存' if record['cached'] else '旧缓存质量修复' if record.get('quality_upgrade') else 'OCR 完成')
         log(f'第 {index + 1}/{len(reader.pages)} 页：' +
-            {'native': '直接提取', 'ocr': '读取缓存' if record['cached'] else 'OCR 完成', 'failed': '识别失败，可重试', 'unavailable': '未安装 OCR 组件'}[record['method']])
+            {'native': '直接提取', 'ocr': ocr_label, 'failed': '识别失败，可重试', 'unavailable': '未安装 OCR 组件'}[record['method']])
     failed = [p['number'] for p in pages if p['method'] == 'failed']
     low = [p['number'] for p in pages if p.get('quality') == 'review' and p['method'] == 'ocr']
     empty = [p['number'] for p in pages if p.get('quality') == 'no_text']

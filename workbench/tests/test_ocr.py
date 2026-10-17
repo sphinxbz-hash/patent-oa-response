@@ -3,6 +3,7 @@ import io
 import json
 import unittest
 import uuid
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -143,6 +144,60 @@ class OCRTests(unittest.TestCase):
         after = store.get(case['id'])['documents'][0]
         self.assertEqual(after['ocr']['status'], 'failed')
         self.assertTrue(any('SHA256' in note for note in after['notes']))
+
+    def test_upright_english_lines_are_not_flipped_by_angle_classifier(self):
+        import numpy as np
+        def infer(image, **options):
+            # The old angle classifier can falsely rotate upright long lines.
+            flipped = options.get('use_cls', True)
+            return SimpleNamespace(txts=['thusn e e sin tina' if flipped else NATIVE],
+                scores=[.64 if flipped else .99], boxes=np.array([[[10, 10], [400, 10], [400, 40], [10, 40]]]))
+        with patch.object(self.module, '_ENGINE', infer):
+            result = self.module._recognize_page(pdf_fixture(native=False), 0)
+        self.assertEqual(result['text'], NATIVE)
+
+    def test_bad_upright_line_retries_rotated_candidate_without_losing_original(self):
+        import numpy as np
+        def infer(image, **options):
+            rotated = options.get('use_cls', True)
+            return SimpleNamespace(txts=[NATIVE if rotated else 'upside down noise'],
+                scores=[.99 if rotated else .3], boxes=np.array([[[10, 10], [400, 10], [400, 40], [10, 40]]]))
+        with patch.object(self.module, '_ENGINE', infer):
+            result = self.module._recognize_page(pdf_fixture(native=False), 0)
+        self.assertEqual(result['text'], NATIVE)
+        self.assertTrue(result['lines'][0].get('orientation_retry'))
+
+    def test_legacy_cache_repairs_bad_lines_without_repeating_page_detection(self):
+        import numpy as np
+        data = pdf_fixture(native=False)
+        legacy_version = 'v1-rapidocr-' + self.module.cache_version().split('-rapidocr-', 1)[1]
+        folder = self.cache / legacy_version / hashlib.sha256(data).hexdigest()
+        folder.mkdir(parents=True)
+        legacy = dict(number=1, method='ocr', text='thusn e e sin tina', confidence=.64,
+                      image_size=[1112, 1389], quality='review',
+                      lines=[{'text':'thusn e e sin tina','confidence':.64,
+                              'box':[[10, 10], [400, 10], [400, 40], [10, 40]]}])
+        (folder / '1.json').write_text(json.dumps(legacy), encoding='utf-8')
+        def infer(image, **options):
+            self.assertFalse(options.get('use_det', True), 'Existing boxes must be reused')
+            return SimpleNamespace(txts=[NATIVE], scores=[.99], boxes=np.empty((0, 4, 2)))
+        with patch.object(self.module, '_ENGINE', infer):
+            result = self.module.recognize_pdf(data, self.cache)
+        self.assertEqual(result['text'], NATIVE)
+        self.assertEqual(result['pages'][0].get('quality_upgrade'), 'v1_cached_boxes')
+        self.assertEqual(json.loads((folder / '1.json').read_text())['text'], legacy['text'])
+
+    def test_optional_orientation_retry_failure_keeps_readable_first_pass(self):
+        import numpy as np
+        def infer(image, **options):
+            if not options.get('use_det', True):
+                raise RuntimeError('angle classifier unavailable')
+            return SimpleNamespace(txts=[NATIVE], scores=[.8],
+                                   boxes=np.array([[[10, 10], [400, 10], [400, 40], [10, 40]]]))
+        with patch.object(self.module, '_ENGINE', infer):
+            result = self.module._recognize_page(pdf_fixture(native=False), 0)
+        self.assertEqual(result['text'], NATIVE)
+        self.assertEqual(result.get('orientation_retry_errors'), 1)
 
 
 if __name__ == '__main__':
