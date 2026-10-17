@@ -94,6 +94,30 @@ Word 正文预览使用同一批生成的 HTML，保留删除线和新增下划�
 
 未装 OCR 组件时仍可运行工作台、保存和下载原件；扫描页提示安装组件后重试或补充文字。
 
+## 英文案卷的版面解析
+
+在“选择与编辑 → 英文材料解析”中切换解析方式，保存后点击“识别扫描材料”或“保存并生成答复包”。适用范围是已确认或根据正文推断为英文的 OA、答复和权项；其他语言及材料仍走现有多语种识别。英文标题本身不作为语言依据。
+
+可选组件使用独立 Python 环境，不改工作台的依赖。Windows 安装：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup_document_parsers.ps1
+```
+
+可加 `-Backend docling` 或 `-Backend paddle` 单独安装。Docling 使用 Tesseract CLI 和校验过的英文 best 模型，并与现有 RapidOCR 比对数字及否定词；出现分歧时，正文保留现有引擎文字并结合 Docling 版面，两份读数均保存在缓存中，提示核对，不猜补数字；Paddle 使用 PP-StructureV3、英文识别模型和官方 BOS 模型源。首次运行会下载公开模型；案件文件在本机处理，不调用生成式大模型或远程文档识别服务。模型和独立环境占用磁盘，未安装的选项在界面中不可选。
+
+材料详情提供“用于草案的正文 / 完整识别文字”切换。正文按版面排除已识别的页眉、页脚及有连续位置证据的页边行号；完整 OCR 文字、识别行、布局坐标和排除记录仍保存在本地派生缓存。表格区域未做结构识别时，保留该区域的 OCR 文字，不推测单元格关系。跨页段落分段保留，不在每页重复全文。存在不确定内容时仍需对照 PDF；“完成”表示取得了各页文字，不是准确率保证。
+
+切换解析器会保存上一版派生文字。失败或部分完成时，保留当前可用文字和分页；原 PDF 不覆盖。缓存按原件 SHA256、引擎及配置版本隔离。材料中的修订标记限制、语言和权项版本限制继续生效。
+
+可对同一案件做只读对测：
+
+```powershell
+python scripts/benchmark_document_parsers.py --case-id 案件ID
+```
+
+输出在 `workbench-data/parser-evaluation/`，包括各引擎独立全文、正文、结构 JSON 和比较表。可加 `--document-ids` 指定文件。报告的结构检查和人工抽核不等于整批字错率。经实测后，可在本机 `workbench-data/tools/default-parser.json` 设置 `{"engine":"docling_tesseract"}` 或 `paddle_structure` 作为未指定案件的默认方式；组件不可用时回退到现有识别。已保存的案件选择优先。
+
 ## 开发与验证
 
 ```powershell

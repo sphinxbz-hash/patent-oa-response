@@ -16,6 +16,16 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ServerTests(unittest.TestCase):
+    def test_parser_setting_is_validated_and_availability_is_exposed(self):
+        case=self.request('/api/cases',{'application_number':'BR112023019754A2','auto_research':False})
+        path='/api/cases/'+case['id']
+        self.assertIn('parser_options',case)
+        case=self.request(path+'/settings',{'ocr_engine':'docling_tesseract'})
+        self.assertEqual(case['settings']['ocr_engine'],'docling_tesseract')
+        with self.assertRaises(HTTPError):self.request(path+'/settings',{'ocr_engine':'arbitrary-script'})
+        self.store.update(case['id'],lambda c:c.update(status='ocr'))
+        with self.assertRaises(HTTPError):self.request(path+'/settings',{'ocr_engine':'paddle_structure'})
+
     def test_second_launch_does_not_reset_running_case_status(self):
         case = self.store.create('BR112023019754A2')
         self.store.update(case['id'], lambda c: c.update(status='researching'))

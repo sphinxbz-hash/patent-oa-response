@@ -25,7 +25,7 @@ PATENT_CITATION = re.compile(r'\b(?:US|EP|WO|CN|JP|KR|BR|GB|DE|FR)\s*\d[\d\s/.,-
 def document_text(document):
     if not document:
         return ''
-    return str(document.get('text') or '\n'.join(str(p.get('text') or '') for p in document.get('pages', []))).strip()
+    return str(document.get('draft_text') or document.get('text') or '\n'.join(str(p.get('text') or '') for p in document.get('pages', []))).strip()
 
 
 def _english(document):

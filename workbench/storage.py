@@ -91,11 +91,13 @@ class Store:
         return self.root / case_id
 
     def create(self, number, target_country='BR'):
+        from .parsers import default_backend
         number = normalize_number(number)
         target_country = str(target_country).upper()
         if not re.fullmatch(r'[A-Z]{2}', target_country):
             raise ValueError('目标法域须为两位代码，例如 BR')
         case = {'id': uuid.uuid4().hex[:16], 'input_number': number, 'target_country': target_country, 'target_application': number if number[:2] == target_country else '', 'title': '', 'status': 'idle', 'family': [], 'documents': [], 'events': [], 'settings': {'source_member': 'EP', 'review_enabled': False}, 'exports': [], 'analysis': {}, 'gaps': ['尚未获取案卷；可以启动检索或补充文件'], 'created_at': now(), 'updated_at': now()}
+        case['settings']['ocr_engine']=default_backend(self.root)
         with self.lock:
             self.case_dir(case['id']).mkdir()
             self._save(case)
@@ -193,43 +195,77 @@ class Store:
 
     def ocr_case(self, case_id):
         from .ocr import cache_version, recognize_pdf
+        from .metadata import english_evidence, enrich_case_documents
+        from .parsers import BACKENDS, default_backend
+        requested = (self.get(case_id).get('settings') or {}).get('ocr_engine') or default_backend(self.root)
+        if requested not in ('rapidocr', *BACKENDS):
+            raise ValueError('未知英文材料解析器')
+        def selected_engine(doc):
+            language = str(doc.get('language') or '').lower()
+            english = language in ('en', 'eng', 'english', 'en-us', 'en-gb')
+            if language in ('', 'unknown', 'und'):
+                english = bool(english_evidence(doc.get('text') or ''))
+            return requested if english and doc.get('role') in ('oa','response','claims') else 'rapidocr'
 
+        attempted = set()
         priority = {'oa': 0, 'response': 1, 'claims': 2, 'original': 3, 'publication': 4}
-        documents = sorted(self.get(case_id)['documents'], key=lambda d: (priority.get(d.get('role'), 5), bool(d.get('requires_clean_text'))))
-        for doc in documents:
-            if not doc.get('local_path') or Path(doc['local_path']).suffix.lower() != '.pdf':
-                continue
-            previous = doc.get('ocr') or {}
-            if previous.get('version') == cache_version() and previous.get('status') in ('complete', 'not_needed'):
-                continue
-            path = (self.case_dir(case_id) / doc['local_path']).resolve()
-            if not path.is_relative_to(self.case_dir(case_id)):
-                raise PermissionError('无效原件路径')
-            self.log(case_id, '正在识别扫描材料：' + doc['title'])
-            try:
-                data = path.read_bytes()
-                if hashlib.sha256(data).hexdigest() != doc['sha256']:
-                    raise ValueError('原件 SHA256 不一致，未执行 OCR')
-                result = recognize_pdf(data, self.root / '.ocr-cache',
-                                       log=lambda message: self.log(case_id, doc['title'][:65] + ' · ' + message))
-            except Exception as exc:
-                self.log(case_id, f'OCR 未完成 {doc["title"]}：{str(exc)[:200]}')
-                result = {'status': 'failed', 'version': cache_version(), 'notes': ['OCR：' + str(exc)[:250]]}
-            def apply(case):
-                current = next((d for d in case['documents'] if d['id'] == doc['id']), None)
-                if current is None:
-                    return
-                if 'pages' in result:
-                    # Full OCR line geometry stays in the page cache, not every API poll.
-                    pages = [{**{k: v for k, v in p.items() if k != 'lines'}, 'line_count': len(p.get('lines', []))} for p in result['pages']]
-                    current.update(text=result['text'], pages=pages)
-                current['ocr'] = {k: v for k, v in result.items() if k not in ('pages', 'text', 'notes')}
-                current['ocr']['processed_at'] = now()
-                current['notes'] = [n for n in current.get('notes', []) if not n.startswith(('扫描件或无可提取文字', 'OCR：'))] + result['notes']
-                case['exports_stale'] = bool(case.get('exports'))
-            self.update(case_id, apply)
+        # A fresh scan first needs language evidence. The second pass upgrades
+        # newly identified English key documents without repeating failed work.
+        for phase in range(2 if requested != 'rapidocr' else 1):
+            documents = sorted(self.get(case_id)['documents'], key=lambda d: (priority.get(d.get('role'), 5), bool(d.get('requires_clean_text'))))
+            for doc in documents:
+                if not doc.get('local_path') or Path(doc['local_path']).suffix.lower() != '.pdf':
+                    continue
+                engine = selected_engine(doc)
+                if (doc['id'], engine) in attempted:
+                    continue
+                attempted.add((doc['id'], engine))
+                previous = doc.get('ocr') or {}
+                if previous.get('version') == cache_version(engine) and previous.get('status') in ('complete', 'not_needed'):
+                    continue
+                path = (self.case_dir(case_id) / doc['local_path']).resolve()
+                if not path.is_relative_to(self.case_dir(case_id)):
+                    raise PermissionError('无效原件路径')
+                self.log(case_id, '正在识别扫描材料：' + doc['title'])
+                try:
+                    data = path.read_bytes()
+                    if hashlib.sha256(data).hexdigest() != doc['sha256']:
+                        raise ValueError('原件 SHA256 不一致，未执行 OCR')
+                    kwargs = {'engine':engine} if engine != 'rapidocr' else {}
+                    result = recognize_pdf(data, self.root / '.ocr-cache',
+                        log=lambda message: self.log(case_id, doc['title'][:65] + ' · ' + message), **kwargs)
+                except Exception as exc:
+                    self.log(case_id, f'OCR 未完成 {doc["title"]}：{str(exc)[:200]}；已有文字保留')
+                    result = {'status': 'failed', 'engine':engine, 'version': cache_version(engine),
+                              'notes': ['OCR：' + str(exc)[:250] + '；已有识别文字已保留。']}
+                def apply(case):
+                    current = next((d for d in case['documents'] if d['id'] == doc['id']), None)
+                    if current is None:
+                        return
+                    preserve = (bool(str(current.get('draft_text') or current.get('text') or '').strip())
+                                and result.get('status') not in ('complete', 'not_needed'))
+                    if 'pages' in result and not preserve:
+                        if current.get('ocr') and str(current.get('text') or '').strip():
+                            snapshot = {k:current.get(k) for k in ('text','draft_text','pages','ocr','notes')}
+                            encoded = json.dumps(snapshot,ensure_ascii=False,sort_keys=True).encode('utf-8')
+                            relative = 'derived/' + doc['id'] + '-' + hashlib.sha256(encoded).hexdigest()[:16] + '.json'
+                            archive = self.case_dir(case_id) / relative
+                            archive.parent.mkdir(exist_ok=True)
+                            if not archive.exists():archive.write_bytes(encoded)
+                            if not any(h.get('path') == relative for h in current.setdefault('ocr_history',[])):
+                                current['ocr_history'].append(dict(path=relative,version=previous.get('version'),time=now()))
+                        # Full OCR geometry remains in its cache, outside API polls.
+                        pages = [{**{k: v for k, v in p.items() if k not in ('lines','blocks','ocr_lines','parser_blocks','parser_ocr_text')}, 'line_count': len(p.get('lines', p.get('ocr_lines',[])))} for p in result['pages']]
+                        current.update(text=result['text'], draft_text=result.get('body_text',''), pages=pages)
+                    current['ocr'] = {k: v for k, v in result.items() if k not in ('pages', 'text', 'body_text', 'notes', 'engine_document','parser_ocr_text','parser_body_text')}
+                    current['ocr']['processed_at'] = now()
+                    if preserve:
+                        current['ocr']['active_text_preserved'] = True
+                        result['notes'] = list(result.get('notes', [])) + ['OCR：此次解析未完整成功，继续使用已有文字及分页。']
+                    current['notes'] = [n for n in current.get('notes', []) if not n.startswith(('扫描件或无可提取文字', 'OCR：'))] + result['notes']
+                    case['exports_stale'] = bool(case.get('exports'))
+                self.update(case_id, apply)
         # Cached OCR skips recognition, but must still repair evidence metadata.
-        from .metadata import enrich_case_documents
         changes = []
         self.update(case_id, lambda c: changes.append(enrich_case_documents(c)))
         if changes[0]:

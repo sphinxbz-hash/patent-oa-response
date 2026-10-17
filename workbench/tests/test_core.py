@@ -21,6 +21,18 @@ class ClaimsTests(unittest.TestCase):
         self.assertEqual([c['number'] for c in claims], [1, 2])
         self.assertIn('a bridge; and a controller.', claims[0]['text'])
 
+    def test_standalone_reference_endpoint_is_kept_in_previous_claim(self):
+        claims=self.module.parse_claims('1. A method.\n2. Another method.\n3. A device.\n'
+            '4. A medium according to any one of claims 1 to\n2.\n'
+            '5. A converter according to claim\n3;')
+        self.assertEqual([c['number'] for c in claims],[1,2,3,4,5])
+        self.assertTrue(claims[3]['text'].endswith('claims 1 to\n2.'))
+        self.assertTrue(claims[4]['text'].endswith('claim\n3;'))
+
+    def test_standalone_real_claim_marker_still_starts_a_claim(self):
+        claims=self.module.parse_claims('1. A method.\n2.\nA different method.')
+        self.assertEqual([c['number'] for c in claims],[1,2])
+
     def test_diff_roundtrip_with_math_and_punctuation(self):
         old = 'A converter, wherein I > I1 and f = 20 kHz.'
         new = 'A converter, wherein I >= I1 and f = 25 kHz.'

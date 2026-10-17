@@ -20,7 +20,10 @@ def available():
     return all(importlib.util.find_spec(name) is not None for name in ('rapidocr', 'onnxruntime', 'pypdfium2'))
 
 
-def cache_version():
+def cache_version(engine='rapidocr'):
+    if engine != 'rapidocr':
+        from .parsers import backend_version
+        return backend_version(engine)
     try:
         engine = version('rapidocr')
         renderer = version('pypdfium2')
@@ -146,7 +149,11 @@ def _read_cache(path, number):
     return cached
 
 
-def recognize_pdf(data, cache_dir, log=lambda message: None):
+def recognize_pdf(data, cache_dir, log=lambda message: None, engine='rapidocr'):
+    if engine != 'rapidocr':
+        from .parsers import recognize_document
+        log('正在进行英文版面解析；首次使用需加载本地模型')
+        return recognize_document(data, cache_dir, engine)
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(data))
@@ -220,6 +227,9 @@ def labelled_text(document):
              '文字为提取/OCR 派生结果；请对照原 PDF 核对。', '']
     for page in document.get('pages', []):
         method = {'native': '原文提取', 'ocr': 'OCR', 'failed': '识别失败', 'unavailable': '待 OCR'}.get(page.get('method'), '原文提取')
-        score = f' · 行平均置信度 {page["confidence"]:.1%}' if page.get('method') == 'ocr' else ''
-        lines += [f'--- 第 {page.get("number") or "?"} 页 · {method}{score} ---', page.get('text', '').strip() or '[未取得文字]', '']
+        score = f' · 行平均置信度 {page["confidence"]:.1%}' if isinstance(page.get('confidence'), (int,float)) else ''
+        lines += [f'--- 第 {page.get("number") or "?"} 页 · {method}{score} ---']
+        if page.get('body_text'):
+            lines += ['[用于草案的正文]', page['body_text'], '[完整识别文字]']
+        lines += [page.get('text', '').strip() or '[未取得文字]', '']
     return '\n'.join(lines)

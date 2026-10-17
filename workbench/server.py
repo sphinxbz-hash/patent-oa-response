@@ -19,7 +19,7 @@ from .research import research_case
 from . import __version__
 
 STATIC = Path(__file__).parent / 'static'
-SETTING_KEYS = {'source_member', 'selected_response_id', 'selected_claims_id', 'pending_claims_id', 'target_oa_id', 'original_id', 'review_enabled', 'response_override', 'claims_override', 'support_rows', 'deadline'}
+SETTING_KEYS = {'source_member', 'selected_response_id', 'selected_claims_id', 'pending_claims_id', 'target_oa_id', 'original_id', 'review_enabled', 'response_override', 'claims_override', 'support_rows', 'deadline', 'ocr_engine'}
 
 
 def instance_info(data_dir):
@@ -143,6 +143,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _case(self, case_id):
         case = self.server.store.get(case_id)
+        from .parsers import backend_status, default_backend
+        case['parser_options'] = backend_status()
+        case['settings'].setdefault('ocr_engine',default_backend(self.server.store.root))
         # Original file text is intentionally available for local inspection; paths remain relative.
         for doc in case['documents']:
             if doc.get('local_path'):
@@ -280,6 +283,12 @@ class Handler(BaseHTTPRequestHandler):
     def _settings(self, case_id, case, data):
         if set(data) - SETTING_KEYS - {'target_application'}:
             raise ValueError('包含不支持的设置字段')
+        if 'ocr_engine' in data:
+            from .parsers import BACKENDS
+            if data['ocr_engine'] not in ('rapidocr', *BACKENDS):
+                raise ValueError('未知英文材料解析器')
+            if case['status'] in ('ocr','researching','generating'):
+                raise RuntimeError('任务运行期间不能切换解析器，请完成后再保存')
         ids = {d['id'] for d in case['documents']}
         for key, value in data.items():
             if key.endswith('_id') and value and value not in ids:

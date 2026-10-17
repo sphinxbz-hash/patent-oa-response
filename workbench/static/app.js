@@ -50,6 +50,7 @@ function updateControls() {
   document.querySelectorAll("#document-metadata-form input, #document-metadata-form select, #document-metadata-form button").forEach((control) => { control.disabled = state.busy || state.current?.status === "generating"; });
   $("generate-button").disabled = state.busy || working();
   $("settings-form").setAttribute("aria-busy", String(state.busy));
+  $("ocr-engine").disabled = state.busy || working();
 }
 async function perform(task, buttonId, busyText) {
   if (state.busy) return;
@@ -184,7 +185,8 @@ function previewDocument(id, scroll = true) {
   if (doc.pages?.length) appendLink($("preview-links"), "下载分页文字 TXT", `${casePath()}/text/${encodeURIComponent(doc.id)}`, "", true);
   if (doc.url || doc.source_url) appendLink($("preview-links"), "打开原始来源", doc.url || doc.source_url);
   $("preview-notes").textContent = Array.isArray(doc.notes) ? doc.notes.map(text).join("\n") : text(doc.notes);
-  $("preview-text").textContent = doc.pages?.length ? doc.pages.map((page) => `--- 第 ${page.number || "?"} 页 · ${page.method === "ocr" ? "OCR" : page.method === "failed" ? "识别失败" : page.method === "unavailable" ? "待 OCR" : "原文提取"} ---\n${text(page.text).trim() || "[未取得文字]"}`).join("\n\n") : text(doc.text).trim() || (hasOriginal(doc) ? "未取得可读取的正文。可以点击“识别扫描材料”重试，或补充经过核对的文字。" : "当前仅有来源记录，尚未取得原件。请通过来源链接下载后导入。") ;
+  const bodyView = $("preview-text-view").value === "body";
+  $("preview-text").textContent = doc.pages?.length ? doc.pages.map((page) => `--- 第 ${page.number || "?"} 页 · ${page.method === "ocr" ? "OCR" : page.method === "failed" ? "识别失败" : page.method === "unavailable" ? "待 OCR" : "原文提取"} ---\n${text(bodyView ? page.body_text || page.text : page.text).trim() || "[未取得文字]"}${bodyView && page.excluded_blocks?.length ? `\n[已排除 ${page.excluded_blocks.length} 个版面元素，完整文字可切换查看]` : ""}`).join("\n\n") : text(bodyView ? doc.draft_text || doc.text : doc.text).trim() || (hasOriginal(doc) ? "未取得可读取的正文。可以点击“识别扫描材料”重试，或补充经过核对的文字。" : "当前仅有来源记录，尚未取得原件。请通过来源链接下载后导入。") ;
   const key = `${state.current.id}/${id}`; const draft = state.metadataDrafts.get(key);
   if (previous !== id || !draft) {
     const values = draft || doc;
@@ -282,6 +284,10 @@ function renderSettings() {
   $("target-application").value = saved.target_application || ""; $("source-member").value = saved.source_member || "";
   for (const [id, key] of Object.entries(sourceFields)) fillSourceSelect($(id), key, saved[key]);
   $("review-enabled").checked = Boolean(saved.review_enabled);
+  $("ocr-engine").value = saved.ocr_engine || "rapidocr";
+  const options = state.current.parser_options || [];
+  for (const option of $("ocr-engine").options) { const available = options.find((item) => item.id === option.value); option.disabled = available ? !available.installed : false; }
+  $("parser-status").textContent = "保存后，生成前会应用所选解析方式。未安装选项不可选；已有文字与原件保留。";
   for (const kind of ["response", "claims"]) { const override = saved[`${kind}_override`]; $(`edit-${kind}`).checked = Boolean(text(override).trim()); $(`${kind}-override`).value = text(override); updateEditor(kind, true); }
   $("support-rows").replaceChildren(); (saved.support_rows || []).forEach((row) => addSupportRow(row, false)); updateSupportEmpty();
   const deadline = saved.deadline || {}; $("deadline-rule").value = deadline.rule_id || ""; $("deadline-trigger").value = deadline.trigger_date || ""; $("deadline-source").value = deadline.source_url || ""; $("deadline-holidays").value = Array.isArray(deadline.extra_holidays) ? deadline.extra_holidays.join(", ") : deadline.extra_holidays || ""; $("deadline-entity").value = deadline.entity_status || "";
@@ -291,12 +297,13 @@ function updateEditor(kind, preserve = false) {
   const sourceId = $(kind === "response" ? "selected-response" : "selected-claims").value;
   const doc = docs().find((item) => item.id === sourceId); const editing = $(`edit-${kind}`).checked; const textarea = $(`${kind}-override`);
   textarea.readOnly = !editing;
-  if (!editing || (!preserve && !textarea.value)) textarea.value = doc?.text || "";
+    if (!editing || (!preserve && !textarea.value)) textarea.value = doc?.draft_text || doc?.text || "";
   $(`${kind}-edit-note`).textContent = editing ? "当前使用编辑稿。保存后用于生成，原始材料保持不变。" : "当前使用所选材料原文。勾选“使用编辑稿”可修改。";
   $(`${kind}-source-note`).textContent = doc ? `${documentStatus(doc)[0]} · ${dateLabel(doc.date)}${doc.language ? ` · ${doc.language}` : ""}${!text(doc.text).trim() ? " · 无可读取正文" : ""}` : "生成时按规则选择可用材料，并在答复包中标明来源；也可手动指定。";
 }
 function readSettings() {
   const result = { target_application: $("target-application").value.trim(), source_member: $("source-member").value.trim(), review_enabled: $("review-enabled").checked, response_override: $("edit-response").checked ? $("response-override").value : "", claims_override: $("edit-claims").checked ? $("claims-override").value : "", support_rows: [], deadline: { rule_id: $("deadline-rule").value.trim(), trigger_date: $("deadline-trigger").value, source_url: $("deadline-source").value.trim(), extra_holidays: $("deadline-holidays").value.split(/[,，\s]+/).map((item) => item.trim()).filter(Boolean), entity_status: $("deadline-entity").value.trim() } };
+  result.ocr_engine = $("ocr-engine").value;
   for (const [id, key] of Object.entries(sourceFields)) result[key] = $(id).value;
   $("support-rows").querySelectorAll("tr").forEach((row) => { const entry = {}; row.querySelectorAll("[data-support]").forEach((input) => { entry[input.dataset.support] = input.value; }); if (Object.values(entry).some((value) => value.trim())) result.support_rows.push(entry); });
   return result;
@@ -495,6 +502,7 @@ $("dismiss-error").addEventListener("click", () => { $("error-banner").hidden = 
 $("mobile-sidebar-toggle").addEventListener("click", () => { const sidebar = document.querySelector(".sidebar"); const collapsed = sidebar.classList.toggle("is-collapsed"); $("mobile-sidebar-toggle").setAttribute("aria-expanded", String(!collapsed)); $("mobile-sidebar-toggle").textContent = collapsed ? "案件管理" : "收起案件"; });
 $("research-button").addEventListener("click", () => perform(async () => { rememberDraft(); const item = await request(`${casePath()}/research`, {}); applyCase(item, false); }, "research-button", "正在启动…"));
 $("ocr-button").addEventListener("click", () => perform(async () => { rememberDraft(); const item = await request(`${casePath()}/ocr`, {}); applyCase(item, false); }, "ocr-button", "正在启动识别…"));
+$("preview-text-view").addEventListener("change", () => { if (state.previewId) previewDocument(state.previewId, false); });
 document.querySelectorAll("[data-tab]").forEach((tab) => { tab.addEventListener("click", () => setTab(tab.dataset.tab)); tab.addEventListener("keydown", (event) => { const order = ["research", "selection", "output"]; const index = order.indexOf(tab.dataset.tab); let next; if (event.key === "ArrowRight") next = (index + 1) % order.length; if (event.key === "ArrowLeft") next = (index + order.length - 1) % order.length; if (event.key === "Home") next = 0; if (event.key === "End") next = order.length - 1; if (next !== undefined) { event.preventDefault(); setTab(order[next]); $(`tab-${order[next]}`).focus(); } }); });
 document.querySelectorAll("[data-go-tab]").forEach((button) => button.addEventListener("click", () => { setTab(button.dataset.goTab); $(`tab-${button.dataset.goTab}`).focus(); }));
 $("show-upload").addEventListener("click", showUpload); $("hide-upload").addEventListener("click", () => { $("upload-form").hidden = true; });

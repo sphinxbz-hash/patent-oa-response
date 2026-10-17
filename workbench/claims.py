@@ -25,6 +25,11 @@ def parse_claims(text):
     """Read numbered plain text without changing technical signs or wording."""
     text = str(text or '').replace('\r\n', '\n').replace('\r', '\n')
     starts = list(re.finditer(r'^\s*(\d{1,3})\s*[.)]\s*(?:\((?:Original|Currently amended|Previously presented|New|Canceled|Withdrawn|Not entered)\)\s*)?', text, re.M | re.I))
+    # OCR can put the endpoint of "claims 1 to 2." on a line by itself.
+    # Preserve that endpoint as content, rather than dropping an empty claim.
+    starts = [m for m in starts if not (
+        re.match(r'[ \t]*\d{1,3}[ \t]*[.)][ \t]*(?:\n|$)',text[m.start():].lstrip('\n'))
+        and re.search(r'\b(?:claim|claims?\s+\d+\s+(?:to|and|or))\s*$',text[:m.start()].rstrip(),re.I))]
     result = []
     for index, match in enumerate(starts):
         number = int(match.group(1))
