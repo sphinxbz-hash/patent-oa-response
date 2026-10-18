@@ -1,0 +1,6 @@
+-r requirements.txt
+# Orientation/cache regressions render synthetic PDFs with a stub OCR engine.
+# Full OCR engines and model downloads are not needed for the unit suite.
+numpy>=1.26,<3
+Pillow>=10,<13
+pypdfium2>=4.30,<6

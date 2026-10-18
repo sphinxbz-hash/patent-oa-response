@@ -121,11 +121,12 @@ python scripts/benchmark_document_parsers.py --case-id 案件ID
 ## 开发与验证
 
 ```powershell
+python -m pip install -r workbench/requirements-test.txt
 python -m unittest discover -s workbench/tests -v
 python scripts/package_skill.py --check
 ```
 
-运行测试需要 requirements.txt 的文档依赖。测试使用独立临时案例，并不对真实案件推断授权/答复结果。`workbench-data/test-runs` 是可独立清理的测试输出。
+测试依赖包含文档组件和合成 PDF 的图像渲染组件；完整 OCR 引擎及模型无需安装。测试使用独立临时案例，并不对真实案件推断授权/答复结果。`workbench-data/test-runs` 是可独立清理的测试输出。
 
 `storage.py` 管数据与原件；`retrieval.py` 管公开站点访问与解析；`research.py` 管取卷流程；`ocr.py` 管页级识别与缓存；`metadata.py` 管可追溯的正文语言推断和候选轮次关联；`analysis.py` 管证据选择和规则；`drafting.py` 管交付；`preview.py` 管已有交付的只读预览；`server.py` 管本机接口；`static` 是无构建依赖的网页。
 

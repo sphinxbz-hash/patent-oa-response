@@ -232,7 +232,7 @@ def recognize_document(data, cache_dir, backend):
     if backend=='docling_tesseract':
         result=crosscheck_document(data,cache_dir,result)
     folder.mkdir(parents=True, exist_ok=True)
-    temporary = cache.with_suffix('.' + uuid.uuid4().hex + '.tmp')
+    temporary = cache.with_suffix('.' + uuid.uuid4().hex[:12] + '.tmp')
     temporary.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     temporary.replace(cache)
     return result

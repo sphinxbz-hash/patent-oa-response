@@ -39,9 +39,9 @@ def native_usable(text):
 
 
 def _engine():
-    from rapidocr import RapidOCR
     global _ENGINE
     if _ENGINE is None:
+        from rapidocr import RapidOCR
         _ENGINE = RapidOCR(params={'EngineConfig.onnxruntime.intra_op_num_threads': 2,
                                   'EngineConfig.onnxruntime.inter_op_num_threads': 1,
                                   'Global.log_level': 'warning'})
@@ -191,7 +191,8 @@ def recognize_pdf(data, cache_dir, log=lambda message: None, engine='rapidocr'):
                                    'review' if output['confidence'] < 0.85 or any(line['confidence'] < 0.85 for line in output['lines']) else 'ok')
                         record.update(output, method='ocr', quality=quality)
                         folder.mkdir(parents=True, exist_ok=True)
-                        temporary = cache.with_suffix('.' + uuid.uuid4().hex + '.tmp')
+                        # Keep atomic writes within Windows' legacy path budget.
+                        temporary = cache.with_suffix('.' + uuid.uuid4().hex[:12] + '.tmp')
                         temporary.write_text(json.dumps(record, ensure_ascii=False), encoding='utf-8')
                         temporary.replace(cache)
                     except Exception as exc:
