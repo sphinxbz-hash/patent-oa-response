@@ -1,0 +1,2 @@
+# Independent environment; do not install into the running workbench runtime.
+docling==2.140.0

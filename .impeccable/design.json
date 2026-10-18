@@ -1,0 +1,10 @@
+{
+  "project": "patent-family-workbench",
+  "direction": "quiet document workspace",
+  "colors": {"background":"#f6f5f0","surface":"#fffefa","text":"#252e2c","muted":"#626c67","primary":"#286458","warning":"#f8f0dc"},
+  "typography": {"family":"system sans-serif","body":14,"caption":12,"heading":24},
+  "spacing": [4,8,12,16,24,32,48],
+  "radius": 5,
+  "mobileBreakpoint": 760,
+  "review": "workbench/VERIFICATION.md"
+}

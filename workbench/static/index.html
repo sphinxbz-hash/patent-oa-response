@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>同族答复工作台</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到当前案件</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="案件管理">
+      <header class="brand"><span class="brand-mark" aria-hidden="true">F</span><div><strong>同族答复工作台</strong><span>专利研究 · 英文答复</span></div><button type="button" class="secondary mobile-sidebar-toggle" id="mobile-sidebar-toggle" aria-expanded="true" aria-controls="new-case-form case-list">收起案件</button></header>
+      <form id="new-case-form" class="new-case-form">
+        <h2>开始新案件</h2>
+        <label for="application-number">任意法域申请号 / 公开号</label>
+        <input id="application-number" name="application_number" placeholder="例如 BR112023019754A2" required maxlength="100" autocomplete="off" spellcheck="false">
+        <label for="target-country">答复目标国家 / 地区</label>
+        <select id="target-country" name="target_country"><option value="BR">巴西 BR</option><option value="EP">欧洲 EP</option><option value="US">美国 US</option><option value="CN">中国 CN</option><option value="JP">日本 JP</option><option value="KR">韩国 KR</option><option value="IN">印度 IN</option><option value="CA">加拿大 CA</option><option value="AU">澳大利亚 AU</option><option value="GB">英国 GB</option><option value="WO">PCT / WO</option><option value="OTHER">其他国家 / 地区</option></select>
+        <label for="other-country" id="other-country-label" hidden>国家 / 地区代码</label><input id="other-country" placeholder="例如 MX" maxlength="2" pattern="[A-Za-z]{2}" hidden>
+        <button type="submit" class="primary full" id="create-button">新建并研究同族</button>
+        <p class="hint">可先输入参考同族号，再选择目标申请。材料不足时可继续补件。</p>
+      </form>
+      <div class="case-list-heading"><h2>案件</h2><button type="button" class="text-button" id="refresh-cases">刷新</button></div>
+      <nav id="case-list" class="case-list" aria-label="案件列表"><p class="sidebar-empty">正在读取案件…</p></nav>
+      <footer class="sidebar-footer"><button type="button" id="demo-button" class="secondary full">打开虚构示例</button><p>仅用于体验流程，不代表真实案件。</p><span class="local-label">本地工作区 · 无大模型调用</span></footer>
+    </aside>
+    <main id="main" tabindex="-1">
+      <div id="error-banner" class="message error" role="alert" hidden><div><strong>操作未完成</strong><p id="error-text"></p></div><button type="button" id="retry-button" class="secondary">重试</button><button type="button" id="dismiss-error" class="text-button">关闭</button></div>
+      <div id="notice" class="message notice" role="status" hidden></div>
+      <section id="welcome" class="welcome">
+        <div class="welcome-title"><span class="document-symbol" aria-hidden="true"><svg viewBox="0 0 48 56" fill="none"><path d="M8 2h23l12 12v40H8zM31 2v13h12M16 26h19M16 34h19M16 42h12" stroke="currentColor" stroke-width="2"/></svg></span><h1>从同族材料开始，<br>完成一份有据可查的答复。</h1></div>
+        <p class="welcome-copy">在左侧输入申请号，研究同族与审查历史；补齐原件、选择复用版本，再生成英文答复包。</p>
+        <ol class="workflow"><li><strong>研究与材料</strong><span>同族记录、审查历史、原件与缺件入口</span></li><li><strong>选择与编辑</strong><span>参考答复、权项版本、比较底稿与修改依据</span></li><li><strong>答复包</strong><span>英文答复、修订权项、清洁权项与中文摘要</span></li></ol>
+        <p class="welcome-note">已有材料？新建案件后即可导入 PDF、Word 或文本。公开来源受限时，工作台会保留补件说明。</p>
+      </section>
+      <div id="case-workspace" hidden>
+        <header class="case-header"><div class="case-heading"><div class="case-title-line"><h1 id="case-number"></h1><span id="case-status" class="badge"></span><span id="demo-badge" class="badge warning" hidden>虚构示例</span></div><p id="case-title"></p><div id="case-meta" class="case-meta"></div></div><button type="button" id="research-button" class="secondary">重新研究</button></header>
+        <div id="job-progress" class="job-progress" role="status" hidden><span class="activity-dot" aria-hidden="true"></span><div><strong id="progress-label"></strong><p id="progress-detail"></p></div></div>
+        <div class="tabbar" role="tablist" aria-label="案件流程"><button type="button" role="tab" id="tab-research" aria-controls="panel-research" aria-selected="true" data-tab="research"><span>1</span>研究与材料</button><button type="button" role="tab" id="tab-selection" aria-controls="panel-selection" aria-selected="false" tabindex="-1" data-tab="selection"><span>2</span>选择与编辑</button><button type="button" role="tab" id="tab-output" aria-controls="panel-output" aria-selected="false" tabindex="-1" data-tab="output"><span>3</span>答复包</button></div>
+        <section id="panel-research" class="tab-panel" role="tabpanel" aria-labelledby="tab-research">
+          <section class="section"><div class="section-heading"><div><h2>同族概览</h2><p>以原始来源为准；法律状态与目标申请仍需确认。</p></div><div class="family-tools"><span id="family-count" class="quiet-count"></span><a id="family-history-link" href="#" download>下载同族历史（MD）</a></div></div><div class="table-wrap"><table><thead><tr><th>法域</th><th>申请号 / 公开号</th><th>状态</th><th>来源</th></tr></thead><tbody id="family-rows"></tbody></table></div></section>
+          <section class="section"><div class="section-heading"><div><h2>案件材料</h2><p>下载或导入后自动识别扫描页；已有材料也可补做识别。</p></div><div class="inline-links material-actions"><button type="button" id="ocr-button" class="secondary">识别扫描材料</button><button type="button" id="show-upload" class="primary">补充材料</button></div></div>
+            <form id="upload-form" class="upload-form" hidden>
+              <div class="section-heading compact"><h3>导入文件或粘贴文字</h3><button type="button" id="hide-upload" class="text-button">收起</button></div>
+              <div class="upload-choice"><label><input type="radio" name="upload_mode" value="file" checked> 上传文件</label><label><input type="radio" name="upload_mode" value="text"> 粘贴文字</label></div>
+              <div id="upload-file-area"><label for="upload-file">PDF / TXT / MD / DOCX，最大 25 MB</label><input type="file" id="upload-file" accept=".pdf,.txt,.md,.docx"><p class="hint">保留原始文件。扫描页自动 OCR；加密文件需提供可读取副本。</p></div>
+              <div id="upload-text-area" hidden><label for="upload-text">材料正文</label><textarea id="upload-text" rows="7" placeholder="粘贴审查意见、答复或完整权利要求文本…"></textarea></div>
+              <div class="form-grid upload-metadata"><div class="field span-two"><label for="upload-title">材料名称</label><input id="upload-title" placeholder="留空则使用文件名" maxlength="300"></div><div class="field"><label for="upload-role">材料类型</label><select id="upload-role"><option value="oa">审查意见 OA</option><option value="response">答复</option><option value="claims">权利要求</option><option value="original">原始申请 / 修改依据</option><option value="publication">公开文本</option><option value="other">其他材料</option></select></div><div class="field"><label for="upload-country">所属法域</label><input id="upload-country" placeholder="例如 BR / EP" maxlength="2" pattern="[A-Za-z]{2}" spellcheck="false"></div><div class="field"><label for="upload-date">文件日期</label><input type="date" id="upload-date"></div><div class="field"><label for="upload-version">权项 / 文件版本</label><select id="upload-version"><option value="unknown">尚未确认</option><option value="pending">当前待审</option><option value="granted">授权版本</option><option value="reference">参考版本</option><option value="publication">公开版本</option><option value="not_entered">未进入审查的版本</option><option value="auxiliary">辅助请求</option></select></div><div class="field"><label for="upload-language">文本语言</label><select id="upload-language"><option value="en">英文</option><option value="pt">葡萄牙文</option><option value="zh">中文</option><option value="de">德文</option><option value="fr">法文</option><option value="ja">日文</option><option value="ko">韩文</option><option value="unknown">其他 / 未确认</option></select></div><div class="field span-two"><label for="upload-url">原始来源链接（可选）</label><input type="url" id="upload-url" placeholder="https://…"></div></div>
+              <div class="form-footer"><p class="hint">日期留空会记为未知，不会以导入日期替代。</p><button type="submit" class="primary" id="upload-button">导入材料</button></div>
+            </form>
+            <div class="table-wrap"><table class="documents-table"><thead><tr><th>材料 / 文件日期</th><th>法域 · 类型</th><th>版本</th><th>取得情况</th><th>查看</th></tr></thead><tbody id="document-rows"></tbody></table></div>
+            <section id="document-preview" class="document-preview" hidden><div class="section-heading compact"><div><h3 id="preview-title"></h3><p id="preview-meta"></p></div><button type="button" id="close-preview" class="secondary">关闭预览</button></div><div id="preview-links" class="inline-links"></div>
+              <details id="document-metadata-details" class="document-metadata"><summary>更新文件信息 <span id="metadata-save-state"></span></summary><p class="hint">按原文确认材料类型、语言和版本。更新信息会保留原始文件；来源网站的界面语言不代表文件语言。</p>
+                <form id="document-metadata-form"><div class="form-grid">
+                  <div class="field span-two"><label for="metadata-title">材料名称</label><input id="metadata-title" maxlength="300"></div>
+                  <div class="field"><label for="metadata-role">材料类型</label><select id="metadata-role"><option value="oa">审查意见 OA</option><option value="response">答复</option><option value="claims">权利要求</option><option value="original">原始申请 / 修改依据</option><option value="publication">公开文本</option><option value="other">其他材料</option></select></div>
+                  <div class="field"><label for="metadata-country">所属法域</label><input id="metadata-country" maxlength="2" pattern="[A-Za-z]{2}" placeholder="例如 BR / EP"></div>
+                  <div class="field"><label for="metadata-date">文件日期</label><input type="date" id="metadata-date"></div>
+                  <div class="field"><label for="metadata-language">文本语言（按原文确认）</label><select id="metadata-language"><option value="unknown">尚未确认</option><option value="en">英文</option><option value="pt">葡萄牙文</option><option value="zh">中文</option><option value="de">德文</option><option value="fr">法文</option><option value="ja">日文</option><option value="ko">韩文</option></select></div>
+                  <div class="field"><label for="metadata-version">权项 / 文件版本</label><select id="metadata-version"><option value="unknown">尚未确认</option><option value="pending">当前待审</option><option value="granted">授权版本</option><option value="reference">参考版本</option><option value="publication">公开版本</option><option value="not_entered">未进入审查的版本</option><option value="auxiliary">辅助请求</option></select></div>
+                  <div class="field span-two"><label for="metadata-application">所属申请号</label><input id="metadata-application" maxlength="150" placeholder="填写该文件所属的具体申请号" spellcheck="false"></div>
+                </div><div class="form-footer"><p class="hint">确认所属申请号有助于区分同一法域下的不同同族案件。</p><button type="submit" class="primary" id="metadata-save-button">保存文件信息</button></div></form>
+              </details>
+              <p id="preview-notes" class="hint"></p><div class="field"><label for="preview-text-view">查看识别文字</label><select id="preview-text-view"><option value="body">用于草案的正文</option><option value="raw">完整识别文字（含页眉页脚）</option></select><p class="hint">原件与完整识别文字保留；正文按版面分区提取。</p></div><pre id="preview-text" tabindex="0"></pre></section>
+          </section>
+          <section class="section" id="gap-section"><div class="section-heading"><div><h2>缺件与手动补充</h2><p>缺件不会阻止生成；未解决事项会进入答复包。</p></div></div><div id="gaps"></div></section>
+          <details class="event-log"><summary>研究与处理记录 <span id="event-count"></span></summary><ol id="event-rows"></ol></details>
+          <div class="panel-footer"><p>准备好现有材料后，选择需要复用的答复与权项。</p><button type="button" class="primary" data-go-tab="selection">选择复用材料</button></div>
+        </section>
+        <section id="panel-selection" class="tab-panel" role="tabpanel" aria-labelledby="tab-selection" hidden>
+          <form id="settings-form">
+            <section class="section"><div class="section-heading"><div><h2>英文材料解析</h2><p>只用于英文审查意见、答复和权项；其他材料继续使用现有多语种识别。</p></div></div><div class="field"><label for="ocr-engine">解析方式</label><select id="ocr-engine"><option value="rapidocr">现有多语种识别</option><option value="docling_tesseract">Docling 版面 + 双引擎核对</option><option value="paddle_structure">PaddleOCR 英文文档解析</option></select><p id="parser-status" class="hint">保存后，生成前会应用所选解析方式。已有文字与原件保留。</p></div></section>
+            <section class="section"><div class="section-heading"><div><h2>答复目标与参考同族</h2><p>输入号用于检索，目标申请号用于本次答复。</p></div><span id="save-indicator" class="save-indicator" role="status">已保存</span></div><div class="form-grid two-columns"><div class="field"><label for="target-application">目标申请号</label><input id="target-application" placeholder="待确认的目标申请号" maxlength="100" spellcheck="false"></div><div class="field"><label for="source-member">复用的参考同族</label><input id="source-member" list="family-options" placeholder="例如 EP 申请号" maxlength="150" spellcheck="false"><datalist id="family-options"></datalist></div></div></section>
+            <section class="section"><div class="section-heading"><div><h2>选择材料与比较版本</h2><p>可留空继续生成。公开或授权权项不自动视为目标申请的当前待审版本。</p></div></div><div class="form-grid two-columns source-grid"><div class="field"><label for="selected-response">参考同族答复</label><select id="selected-response" data-setting="selected_response_id"></select><p id="response-source-note" class="hint"></p></div><div class="field"><label for="selected-claims">拟复用的权利要求</label><select id="selected-claims" data-setting="selected_claims_id"></select><p id="claims-source-note" class="hint"></p></div><div class="field"><label for="pending-claims">目标申请的当前待审权项 <span class="label-note">修订比较底稿</span></label><select id="pending-claims" data-setting="pending_claims_id"></select></div><div class="field"><label for="target-oa">目标申请的审查意见 OA</label><select id="target-oa" data-setting="target_oa_id"></select></div><div class="field span-two"><label for="original-document">原始申请文件 <span class="label-note">修改依据</span></label><select id="original-document" data-setting="original_id"></select></div></div><label class="review-option"><input type="checkbox" id="review-enabled"><span><strong>附加适用性核查（可选）</strong><small>生成基于已有材料与规则的核查提示，不设置审批门槛。</small></span></label></section>
+            <section class="section"><div class="section-heading"><div><h2>编辑复用文本</h2><p>编辑内容保存为本次工作稿，原始材料保留不变。英文答复不会自动翻译非英文原文。</p></div></div><div class="editor-grid"><div class="editor"><div class="editor-heading"><label for="response-override">参考答复正文</label><label class="checkbox-label"><input type="checkbox" id="edit-response"> 使用编辑稿</label></div><textarea id="response-override" rows="13" readonly placeholder="选择参考答复后在此查看正文。"></textarea><p id="response-edit-note" class="hint">当前使用所选材料原文。</p></div><div class="editor"><div class="editor-heading"><label for="claims-override">拟复用权利要求正文</label><label class="checkbox-label"><input type="checkbox" id="edit-claims"> 使用编辑稿</label></div><textarea id="claims-override" rows="13" readonly placeholder="选择拟复用权项后在此查看正文。"></textarea><p id="claims-edit-note" class="hint">当前使用所选材料原文。</p></div></div></section>
+            <section class="section"><div class="section-heading"><div><h2>修改依据表</h2><p>为修改内容填写原始记载和页码。没有原始来源的依据会标为待核查。</p></div><button type="button" id="add-support-row" class="secondary">添加一行</button></div><div id="support-empty" class="empty-inline">尚未填写修改依据。可先生成草案，再补充具体依据。</div><div class="table-wrap"><table id="support-table" class="support-table" hidden><thead><tr><th>权项</th><th>修改内容</th><th>原始依据</th><th>来源材料</th><th>页码</th><th><span class="sr-only">操作</span></th></tr></thead><tbody id="support-rows"></tbody></table></div></section>
+            <details class="deadline-settings"><summary>期限与费用核查信息（可选）</summary><p class="hint">90 日规则仅给出名义日期，节假日顺延与规则适用性仍须核实。费用依据不足时不推测金额。</p><div class="form-grid two-columns"><div class="field"><label for="deadline-rule">适用期限规则</label><select id="deadline-rule"><option value="">未确认 · 不计算期限</option><option value="BR_PRELIM_90">巴西初步审查 · 名义 90 日</option></select></div><div class="field"><label for="deadline-trigger">期限触发日期</label><input type="date" id="deadline-trigger"></div><div class="field span-two"><label for="deadline-source">规则来源链接</label><input type="url" id="deadline-source" placeholder="https://…"></div><div class="field"><label for="deadline-holidays">额外休假日期（逗号分隔）</label><input id="deadline-holidays" placeholder="YYYY-MM-DD, YYYY-MM-DD"></div><div class="field"><label for="deadline-entity">申请人收费资格 / 实体类型</label><input id="deadline-entity" placeholder="未确认可留空"></div></div></details>
+            <div class="settings-footer"><div><strong id="settings-footer-state">材料选择已保存</strong><p>缺少材料时仍可生成；待核查内容将明确列出。</p></div><div class="button-group"><button type="submit" class="secondary" id="save-button">保存选择与编辑</button><button type="button" class="primary" id="generate-button">保存并生成答复包</button></div></div>
+          </form>
+        </section>
+        <section id="panel-output" class="tab-panel" role="tabpanel" aria-labelledby="tab-output" hidden>
+          <section class="section"><div class="section-heading"><div><h2>英文答复包</h2><p>在此预览正文、修改标记和中文摘要，也可下载原文件。</p></div><a id="bundle-link" class="button primary" href="#" hidden>下载完整 ZIP</a></div><div id="output-summary"></div>
+            <section id="output-reader" class="output-reader" aria-label="答复包文档预览" hidden>
+              <div class="reader-toolbar"><div class="reader-picker"><label for="output-file">预览文件</label><select id="output-file"></select></div><a id="reader-download" class="button secondary" href="#" download>下载当前文件</a></div>
+              <p id="reader-note" class="hint"></p>
+              <div id="reader-status" class="reader-status" role="status" aria-live="polite"></div><button type="button" id="reader-retry" class="secondary" hidden>重试预览</button>
+              <iframe id="output-frame" class="output-frame" title="答复包正文" sandbox="" referrerpolicy="no-referrer" hidden></iframe>
+            </section>
+            <details id="all-exports" class="all-exports" hidden><summary>全部文件与其他格式</summary><div id="export-list" class="export-list"></div></details>
+            <div id="output-empty" class="output-empty"><h3>答复包尚未生成</h3><p>选择参考材料后即可生成。材料不足时，系统会输出可生成部分并列明缺件。</p><button type="button" class="primary" data-go-tab="selection">选择材料并生成</button></div></section>
+          <section class="section" id="analysis-section" hidden><div class="section-heading"><div><h2>本次生成说明</h2><p>请结合来源原件审阅草案和未解决事项。</p></div></div><div id="analysis-content"></div></section>
+          <div class="panel-footer"><p>需要调整？修改材料选择和文本后，可重新生成。</p><button type="button" class="secondary" data-go-tab="selection">返回编辑</button></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

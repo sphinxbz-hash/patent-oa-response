@@ -7,3 +7,6 @@ dist/
 .install-check/
 .env
 .env.*
+workbench-data/
+.venv/
+.impeccable/review/
